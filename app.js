@@ -555,21 +555,21 @@ function renderizarTabela(dadosExibicao) {
   dadosExibicao.sort((a, b) => new Date(b.data) - new Date(a.data));
 
   dadosExibicao.forEach((item) => {
-    totalAcumulado += item.valor;
+    totalAcumulado += parseFloat(item.valor) || 0;
     const tr = document.createElement('tr');
-    tr.className = "hover:bg-emerald-50/50 transition";
-
-    const dataFormatada = item.data.split('-').reverse().join('/');
-    const valorFormatado = "R$ " + formatarMoedaBR(item.valor);
+    
+    // Força fundo escuro com borda e remove qualquer opacidade
+    tr.className = "border-b border-slate-700/60 hover:bg-slate-700/50 transition";
+    tr.style.cssText = "opacity: 1 !important; color: #ffffff !important;";
 
     tr.innerHTML = `
-      <td class="p-2 font-medium text-gray-700">${dataFormatada}</td>
-      <td class="p-2 text-gray-600">${diasNomes[item.diaSemanaIndex]}</td>
-      <td class="p-2 font-semibold text-hotel-primary">${item.departamento}</td>
-      <td class="p-2 font-bold text-gray-800">${valorFormatado}</td>
-      <td class="p-2 text-center space-x-1">
-        <button onclick="prepararEdicao(${item._originalIndex})" class="px-2 py-0.5 bg-amber-500 text-white text-[11px] rounded hover:bg-amber-600 font-medium">Editar</button>
-        <button onclick="excluirItem(${item._originalIndex})" class="px-2 py-0.5 bg-red-600 text-white text-[11px] rounded hover:bg-red-700 font-medium">Excluir</button>
+      <td class="p-2" style="color: #f8fafc !important; font-weight: 600;">${formataDataExibicao(item.data)}</td>
+      <td class="p-2" style="color: #cbd5e1 !important;">${obterDiaSemana(item.data)}</td>
+      <td class="p-2 font-bold" style="color: #34d399 !important;">${item.departamento}</td>
+      <td class="p-2 font-bold" style="color: #ffffff !important;">R$ ${parseFloat(item.valor).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
+      <td class="p-2 text-center">
+        <button onclick="editarLancamento(${item.id})" class="bg-amber-500/20 text-amber-300 hover:bg-amber-500/40 px-2 py-1 rounded font-bold text-xs mr-1 transition">Editar</button>
+        <button onclick="excluirLancamento(${item.id})" class="bg-rose-500/20 text-rose-300 hover:bg-rose-500/40 px-2 py-1 rounded font-bold text-xs transition">Excluir</button>
       </td>
     `;
     tbody.appendChild(tr);
