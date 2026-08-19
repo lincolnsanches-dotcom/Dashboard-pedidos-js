@@ -539,6 +539,7 @@ function filtrarLancamentos() {
 }
 
 function renderizarTabela(dadosExibicao) {
+  dadosExibicao = dadosExibicao || [];
   const tbody = document.getElementById('tabela-corpo');
   const totalFiltroEl = document.getElementById('total-filtro');
   tbody.innerHTML = '';
