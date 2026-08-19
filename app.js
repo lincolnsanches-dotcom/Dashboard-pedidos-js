@@ -34,12 +34,29 @@ if (typeof firebase !== 'undefined' && firebase.database) {
 function sincronizarComFirebase() {
   if (typeof firebase !== 'undefined' && firebase.database) {
     firebase.database().ref('dados_dashboard').set({
-      lancamentos: lancamentos,
-      receitasOrcadas: receitasOrcadas,
-      receitasRealizadas: receitasRealizadas,
-      despesasOrcadas: despesasOrcadas
-    });
+      lancamentos: typeof lancamentos !== 'undefined' ? lancamentos : [],
+      receitasOrcadas: typeof receitasOrcadas !== 'undefined' ? receitasOrcadas : {},
+      receitasRealizadas: typeof receitasRealizadas !== 'undefined' ? receitasRealizadas : {},
+      despesasOrcadas: typeof despesasOrcadas !== 'undefined' ? despesasOrcadas : {}
+    }).then(() => {
+      console.log("✅ Dados salvos no Firebase!");
+    }).catch(err => console.error("❌ Erro ao salvar no Firebase:", err));
   }
+}
+
+// Escuta alterações de outras máquinas e atualiza a tela na hora
+if (typeof firebase !== 'undefined' && firebase.database) {
+  firebase.database().ref('dados_dashboard').on('value', (snapshot) => {
+    const dados = snapshot.val();
+    if (dados) {
+      if (dados.lancamentos) lancamentos = dados.lancamentos;
+      if (dados.receitasOrcadas) receitasOrcadas = dados.receitasOrcadas;
+      if (dados.receitasRealizadas) receitasRealizadas = dados.receitasRealizadas;
+      if (dados.despesasOrcadas) despesasOrcadas = dados.despesasOrcadas;
+      if (typeof renderizarTabela === 'function') renderizarTabela();
+      if (typeof atualizarDashboards === 'function') atualizarDashboards();
+    }
+  });
 }
 
 const mapeamentoDeptos = {
