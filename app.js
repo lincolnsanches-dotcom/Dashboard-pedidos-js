@@ -44,21 +44,6 @@ function sincronizarComFirebase() {
   }
 }
 
-// Escuta alterações de outras máquinas e atualiza a tela na hora
-if (typeof firebase !== 'undefined' && firebase.database) {
-  firebase.database().ref('dados_dashboard').on('value', (snapshot) => {
-    const dados = snapshot.val();
-    if (dados) {
-      if (dados.lancamentos) lancamentos = dados.lancamentos;
-      if (dados.receitasOrcadas) receitasOrcadas = dados.receitasOrcadas;
-      if (dados.receitasRealizadas) receitasRealizadas = dados.receitasRealizadas;
-      if (dados.despesasOrcadas) despesasOrcadas = dados.despesasOrcadas;
-      if (typeof renderizarTabela === 'function') renderizarTabela();
-      if (typeof atualizarDashboards === 'function') atualizarDashboards();
-    }
-  });
-}
-
 const mapeamentoDeptos = {
   "2401": "Restaurante Vezzoso Cucina",
   "2407": "Restaurante Kibô Japanese",
@@ -410,62 +395,63 @@ function importarRelatorioDRE(evento) {
   reader.readAsArrayBuffer(file);
 }
 
-document.getElementById('form-requisicao').addEventListener('submit', (e) => {
-  e.preventDefault();
+const formReq = document.getElementById('form-requisicao');
+if (formReq) {
+  formReq.addEventListener('submit', (e) => {
+    e.preventDefault();
 
-  const index = parseInt(document.getElementById('edit-index').value);
-  const dataVal = document.getElementById('data').value;
-  const deptoVal = document.getElementById('departamento').value;
-  const valorVal = parseFloat(document.getElementById('valor').value);
+    const index = parseInt(document.getElementById('edit-index').value);
+    const dataVal = document.getElementById('data').value;
+    const deptoVal = document.getElementById('departamento').value;
+    const valorVal = parseFloat(document.getElementById('valor').value);
 
-  const chaveMes = obterChaveMes(dataVal);
-  const tetoDesp = (despesasOrcadas[chaveMes] && despesasOrcadas[chaveMes][deptoVal]) ? despesasOrcadas[chaveMes][deptoVal] : 0;
+    const chaveMes = obterChaveMes(dataVal);
+    const tetoDesp = (despesasOrcadas[chaveMes] && despesasOrcadas[chaveMes][deptoVal]) ? despesasOrcadas[chaveMes][deptoVal] : 0;
 
-  if (tetoDesp > 0) {
-    const partesNovaData = dataVal.split('-');
-    const mesNovo = parseInt(partesNovaData[1]) - 1;
-    const anoNovo = parseInt(partesNovaData[0]);
+    if (tetoDesp > 0) {
+      const partesNovaData = dataVal.split('-');
+      const mesNovo = parseInt(partesNovaData[1]) - 1;
+      const anoNovo = parseInt(partesNovaData[0]);
 
-    const totalMesAtual = lancamentos.reduce((acc, item, idx) => {
-      if (idx === index) return acc;
-      const p = item.data.split('-');
-      const m = parseInt(p[1]) - 1;
-      const a = parseInt(p[0]);
-      if (item.departamento === deptoVal && m === mesNovo && a === anoNovo) {
-        return acc + item.valor;
+      const totalMesAtual = lancamentos.reduce((acc, item, idx) => {
+        if (idx === index) return acc;
+        const p = item.data.split('-');
+        const m = parseInt(p[1]) - 1;
+        const a = parseInt(p[0]);
+        if (item.departamento === deptoVal && m === mesNovo && a === anoNovo) {
+          return acc + item.valor;
+        }
+        return acc;
+      }, 0);
+
+      if (totalMesAtual + valorVal > tetoDesp) {
+        const excesso = (totalMesAtual + valorVal) - tetoDesp;
+        alert(`⚠️ ATENÇÃO: Este lançamento excede o Teto de Despesa do setor (${deptoVal}) em R$ ${formatarMoedaBR(excesso)}!\nO lançamento será gravado para fins de registro.`);
       }
-      return acc;
-    }, 0);
-
-    if (totalMesAtual + valorVal > tetoDesp) {
-      const excesso = (totalMesAtual + valorVal) - tetoDesp;
-      alert(`⚠️ ATENÇÃO: Este lançamento excede o Teto de Despesa do setor (${deptoVal}) em R$ ${formatarMoedaBR(excesso)}!\nO lançamento será gravado para fins de registro.`);
     }
-  }
 
-  const partes = dataVal.split('-');
-  const dataObj = new Date(partes[0], partes[1] - 1, partes[2]);
+    const partes = dataVal.split('-');
+    const dataObj = new Date(partes[0], partes[1] - 1, partes[2]);
 
-  const novoItem = {
-    data: dataVal,
-    diaSemanaIndex: dataObj.getDay(),
-    departamento: deptoVal,
-    valor: valorVal
-  };
+    const novoItem = {
+      data: dataVal,
+      diaSemanaIndex: dataObj.getDay(),
+      departamento: deptoVal,
+      valor: valorVal
+    };
 
-  if (index === -1) {
-    lancamentos.push(novoItem);
-  } else {
-    lancamentos[index] = novoItem;
-  }
+    if (index === -1) {
+      lancamentos.push(novoItem);
+    } else {
+      lancamentos[index] = novoItem;
+    }
 
-  localStorage.setItem('requisicoes_dados', JSON.stringify(lancamentos));
-
-  sincronizarComFirebase();
-
-  limparFormulario();
-  filtrarLancamentos();
-});
+    localStorage.setItem('requisicoes_dados', JSON.stringify(lancamentos));
+    sincronizarComFirebase();
+    limparFormulario();
+    filtrarLancamentos();
+  });
+}
 
 function obterIntervaloSemana(dataRef) {
   const d = new Date(dataRef);
@@ -496,10 +482,14 @@ function alternarModoFiltro() {
 }
 
 function filtrarLancamentos() {
-  const modo = document.getElementById('filtro-modo').value;
-  const deptoFiltro = document.getElementById('filtro-depto').value;
-  const inputDataBase = document.getElementById('filtro-data-base').value;
+  const modoEl = document.getElementById('filtro-modo');
+  const deptoEl = document.getElementById('filtro-depto');
+  const inputDataBaseEl = document.getElementById('filtro-data-base');
   const infoSemana = document.getElementById('info-semana-atual');
+
+  const modo = modoEl ? modoEl.value : 'semana_atual';
+  const deptoFiltro = deptoEl ? deptoEl.value : 'todos';
+  const inputDataBase = inputDataBaseEl ? inputDataBaseEl.value : null;
 
   let dataRef = new Date();
   if (modo === 'semana_especifica' && inputDataBase) {
@@ -527,12 +517,14 @@ function filtrarLancamentos() {
     return passaData && passaDepto;
   });
 
-  if (modo === 'semana_atual' || modo === 'semana_especifica') {
-    infoSemana.innerText = `Exibindo semana de ${inicio.toLocaleDateString('pt-BR')} (Seg) a ${fim.toLocaleDateString('pt-BR')} (Dom)`;
-  } else if (modo === 'mes_atual') {
-    infoSemana.innerText = `Exibindo lançamentos do mês atual`;
-  } else {
-    infoSemana.innerText = `Exibindo todo o histórico registrado`;
+  if (infoSemana) {
+    if (modo === 'semana_atual' || modo === 'semana_especifica') {
+      infoSemana.innerText = `Exibindo semana de ${inicio.toLocaleDateString('pt-BR')} (Seg) a ${fim.toLocaleDateString('pt-BR')} (Dom)`;
+    } else if (modo === 'mes_atual') {
+      infoSemana.innerText = `Exibindo lançamentos do mês atual`;
+    } else {
+      infoSemana.innerText = `Exibindo todo o histórico registrado`;
+    }
   }
 
   renderizarTabela(lancamentosFiltrados);
@@ -540,46 +532,57 @@ function filtrarLancamentos() {
 
 function renderizarTabela(dadosExibicao) {
   dadosExibicao = dadosExibicao || [];
+
   const tbody = document.getElementById('tabela-corpo');
   const totalFiltroEl = document.getElementById('total-filtro');
-  tbody.innerHTML = '';
+  if (!tbody) return;
 
+  tbody.innerHTML = '';
   let totalAcumulado = 0;
 
   if (dadosExibicao.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="5" class="p-4 text-center text-gray-500">Nenhum lançamento encontrado para este período.</td></tr>`;
-    totalFiltroEl.innerText = "R$ 0,00";
+    tbody.innerHTML = `<tr><td colspan="5" class="p-4 text-center text-slate-400 font-medium">Nenhum lançamento encontrado para este período.</td></tr>`;
+    if (totalFiltroEl) totalFiltroEl.innerText = "R$ 0,00";
     return;
   }
 
+  // Ordena por data mais recente
   dadosExibicao.sort((a, b) => new Date(b.data) - new Date(a.data));
 
   dadosExibicao.forEach((item) => {
-    totalAcumulado += parseFloat(item.valor) || 0;
+    const valorNum = parseFloat(item.valor) || 0;
+    totalAcumulado += valorNum;
+    const idxOriginal = item._originalIndex !== undefined ? item._originalIndex : lancamentos.indexOf(item);
+
+    const partes = item.data.split('-');
+    const dataFormatada = partes.length === 3 ? `${partes[2]}/${partes[1]}/${partes[0]}` : item.data;
+    const diaNome = diasNomes[item.diaSemanaIndex] || '';
+
     const tr = document.createElement('tr');
-    
-    // Força fundo escuro com borda e remove qualquer opacidade
-    tr.className = "border-b border-slate-700/60 hover:bg-slate-700/50 transition";
-    tr.style.cssText = "opacity: 1 !important; color: #ffffff !important;";
+    tr.className = "border-b border-slate-700/60 hover:bg-slate-800/80 transition";
 
     tr.innerHTML = `
-      <td class="p-2" style="color: #f8fafc !important; font-weight: 600;">${formataDataExibicao(item.data)}</td>
-      <td class="p-2" style="color: #cbd5e1 !important;">${obterDiaSemana(item.data)}</td>
-      <td class="p-2 font-bold" style="color: #34d399 !important;">${item.departamento}</td>
-      <td class="p-2 font-bold" style="color: #ffffff !important;">R$ ${parseFloat(item.valor).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
-      <td class="p-2 text-center">
-        <button onclick="editarLancamento(${item.id})" class="bg-amber-500/20 text-amber-300 hover:bg-amber-500/40 px-2 py-1 rounded font-bold text-xs mr-1 transition">Editar</button>
-        <button onclick="excluirLancamento(${item.id})" class="bg-rose-500/20 text-rose-300 hover:bg-rose-500/40 px-2 py-1 rounded font-bold text-xs transition">Excluir</button>
+      <td class="p-2.5 text-slate-100 font-medium">${dataFormatada}</td>
+      <td class="p-2.5 text-slate-300">${diaNome}</td>
+      <td class="p-2.5 font-bold text-emerald-400">${item.departamento}</td>
+      <td class="p-2.5 font-bold text-slate-100">R$ ${valorNum.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+      <td class="p-2.5 text-center">
+        <button onclick="prepararEdicao(${idxOriginal})" class="px-2 py-1 bg-amber-500/20 text-amber-300 hover:bg-amber-500/40 rounded text-xs font-bold mr-1 transition">Editar</button>
+        <button onclick="excluirItem(${idxOriginal})" class="px-2 py-1 bg-rose-500/20 text-rose-300 hover:bg-rose-500/40 rounded text-xs font-bold transition">Excluir</button>
       </td>
     `;
     tbody.appendChild(tr);
   });
 
-  totalFiltroEl.innerText = "R$ " + formatarMoedaBR(totalAcumulado);
+  if (totalFiltroEl) {
+    totalFiltroEl.innerText = `R$ ${totalAcumulado.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  }
 }
 
 function prepararEdicao(indexOriginal) {
   const item = lancamentos[indexOriginal];
+  if (!item) return;
+
   document.getElementById('edit-index').value = indexOriginal;
   document.getElementById('data').value = item.data;
   document.getElementById('departamento').value = item.departamento;
@@ -595,17 +598,19 @@ function excluirItem(indexOriginal) {
   if (confirm("Deseja realmente excluir este lançamento?")) {
     lancamentos.splice(indexOriginal, 1);
     localStorage.setItem('requisicoes_dados', JSON.stringify(lancamentos));
-
     sincronizarComFirebase();
-
     filtrarLancamentos();
   }
 }
 
 function limparFormulario() {
-  document.getElementById('form-requisicao').reset();
+  const form = document.getElementById('form-requisicao');
+  if (form) form.reset();
+  
   document.getElementById('edit-index').value = "-1";
-  document.getElementById('data').valueAsDate = new Date();
+  const elData = document.getElementById('data');
+  if (elData) elData.valueAsDate = new Date();
+
   document.getElementById('form-titulo').innerHTML = "<span>📝</span> Novo Lançamento";
   document.getElementById('btn-salvar').innerText = "Salvar";
   document.getElementById('btn-cancelar').classList.add('hidden');
@@ -657,16 +662,19 @@ function atualizarGraficos() {
     despesaOrcadaHotel += (despOrcDoMes[d] || 0);
   });
 
-  document.getElementById('dash-card-total').innerText = "R$ " + formatarMoedaBR(totalGeral);
+  const elTotal = document.getElementById('dash-card-total');
+  if (elTotal) elTotal.innerText = "R$ " + formatarMoedaBR(totalGeral);
   
   const elPerc = document.getElementById('dash-card-percentual');
-  if (receitaRealizadaHotel > 0) {
-    const cmvReal = ((totalGeral / receitaRealizadaHotel) * 100).toFixed(1);
-    elPerc.innerText = `${cmvReal}%`;
-    elPerc.className = `text-xl font-extrabold mt-0.5 ${cmvReal > 29.0 ? 'text-red-400' : 'text-emerald-400'}`;
-  } else {
-    elPerc.innerText = 'N/A';
-    elPerc.className = 'text-xl font-extrabold text-slate-500 mt-0.5';
+  if (elPerc) {
+    if (receitaRealizadaHotel > 0) {
+      const cmvReal = ((totalGeral / receitaRealizadaHotel) * 100).toFixed(1);
+      elPerc.innerText = `${cmvReal}%`;
+      elPerc.className = `text-xl font-extrabold mt-0.5 ${cmvReal > 29.0 ? 'text-red-400' : 'text-emerald-400'}`;
+    } else {
+      elPerc.innerText = 'N/A';
+      elPerc.className = 'text-xl font-extrabold text-slate-500 mt-0.5';
+    }
   }
 
   let topDepto = '-';
@@ -677,7 +685,8 @@ function atualizarGraficos() {
       topDepto = depto;
     }
   }
-  document.getElementById('dash-card-top-depto').innerText = topDepto;
+  const elTop = document.getElementById('dash-card-top-depto');
+  if (elTop) elTop.innerText = topDepto;
 
   const labelsDeptos = [];
   const percentuaisExibicaoBarra = []; 
@@ -730,94 +739,97 @@ function atualizarGraficos() {
     }
   });
 
-  if (chartDeptos) chartDeptos.destroy();
-  chartDeptos = new Chart(document.getElementById('chartDeptos'), {
-    type: 'bar',
-    data: {
-      labels: labelsDeptos,
-      datasets: [
-        {
-          label: '% Consumido do Orçamento',
-          data: percentuaisExibicaoBarra,
-          backgroundColor: coresGastos,
-          borderRadius: 4,
-          barThickness: 20,
-          grouped: false,
-          order: 1
-        },
-        {
-          label: 'Teto Orçado (100%)',
-          data: percentuaisExibicaoBarra.map(() => 100),
-          backgroundColor: '#334155',
-          borderRadius: 4,
-          barThickness: 20,
-          grouped: false,
-          order: 2
-        }
-      ]
-    },
-    options: {
-      indexAxis: 'y',
-      responsive: true,
-      maintainAspectRatio: false,
-      layout: {
-        padding: { right: 180 }
-      },
-      plugins: {
-        legend: { 
-          display: true, 
-          position: 'top', 
-          labels: { color: '#f8fafc', font: { size: 11, weight: 'bold' } } 
-        },
-        datalabels: {
-          font: { weight: 'bold', size: 10 },
-          anchor: 'end',
-          align: 'end',
-          offset: 8,
-          color: (ctx) => {
-            const perc = percentuaisReais[ctx.dataIndex];
-            if (perc > 100) return '#ef4444';
-            if (perc >= 80) return '#fb923c';
-            return '#34d399';
+  const canvas = document.getElementById('chartDeptos');
+  if (canvas) {
+    if (chartDeptos) chartDeptos.destroy();
+    chartDeptos = new Chart(canvas, {
+      type: 'bar',
+      data: {
+        labels: labelsDeptos,
+        datasets: [
+          {
+            label: '% Consumido do Orçamento',
+            data: percentuaisExibicaoBarra,
+            backgroundColor: coresGastos,
+            borderRadius: 4,
+            barThickness: 20,
+            grouped: false,
+            order: 1
           },
-          formatter: (value, ctx) => {
-            if (ctx.datasetIndex === 0) {
-              const percReal = percentuaisReais[ctx.dataIndex];
-              const gasto = valoresGastos[ctx.dataIndex];
-              const teto = valoresTetos[ctx.dataIndex];
+          {
+            label: 'Teto Orçado (100%)',
+            data: percentuaisExibicaoBarra.map(() => 100),
+            backgroundColor: '#334155',
+            borderRadius: 4,
+            barThickness: 20,
+            grouped: false,
+            order: 2
+          }
+        ]
+      },
+      options: {
+        indexAxis: 'y',
+        responsive: true,
+        maintainAspectRatio: false,
+        layout: {
+          padding: { right: 180 }
+        },
+        plugins: {
+          legend: { 
+            display: true, 
+            position: 'top', 
+            labels: { color: '#f8fafc', font: { size: 11, weight: 'bold' } } 
+          },
+          datalabels: {
+            font: { weight: 'bold', size: 10 },
+            anchor: 'end',
+            align: 'end',
+            offset: 8,
+            color: (ctx) => {
+              const perc = percentuaisReais[ctx.dataIndex];
+              if (perc > 100) return '#ef4444';
+              if (perc >= 80) return '#fb923c';
+              return '#34d399';
+            },
+            formatter: (value, ctx) => {
+              if (ctx.datasetIndex === 0) {
+                const percReal = percentuaisReais[ctx.dataIndex];
+                const gasto = valoresGastos[ctx.dataIndex];
+                const teto = valoresTetos[ctx.dataIndex];
 
-              if (teto === 0 && gasto > 0) {
-                return `🚨 Sem Teto (${formatarK(gasto)})`;
+                if (teto === 0 && gasto > 0) {
+                  return `🚨 Sem Teto (${formatarK(gasto)})`;
+                }
+
+                if (percReal > 100) {
+                  return `🚨 ${percReal.toFixed(1)}% (${formatarK(gasto)} / ${formatarK(teto)})`;
+                }
+
+                return `${percReal.toFixed(1)}% (${formatarK(gasto)} / ${formatarK(teto)})`;
               }
-
-              if (percReal > 100) {
-                return `🚨 ${percReal.toFixed(1)}% (${formatarK(gasto)} / ${formatarK(teto)})`;
-              }
-
-              return `${percReal.toFixed(1)}% (${formatarK(gasto)} / ${formatarK(teto)})`;
+              return '';
             }
-            return '';
+          }
+        },
+        scales: {
+          x: {
+            min: 0,
+            max: 100,
+            ticks: { 
+              callback: (val) => val + '%', 
+              color: '#94a3b8', 
+              font: { size: 10 } 
+            },
+            grid: { color: '#1e293b' }
+          },
+          y: {
+            ticks: { color: '#f8fafc', font: { size: 11, weight: 'bold' } },
+            grid: { display: false }
           }
         }
-      },
-      scales: {
-        x: {
-          min: 0,
-          max: 100,
-          ticks: { 
-            callback: (val) => val + '%', 
-            color: '#94a3b8', 
-            font: { size: 10 } 
-          },
-          grid: { color: '#1e293b' }
-        },
-        y: {
-          ticks: { color: '#f8fafc', font: { size: 11, weight: 'bold' } },
-          grid: { display: false }
-        }
       }
-    }
-  });
+    });
+  }
 
   renderizarInsightsIA(analiseIA);
 }
