@@ -9,7 +9,7 @@
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.0.0"></script>
-
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script>
     tailwind.config = {
       theme: {
@@ -251,6 +251,15 @@
             <h3 class="text-xs font-bold text-white flex items-center gap-1.5">
               <span>💡</span> Análise Avançada de IA & Recomendações
             </h3>
+
+            <div class="flex gap-2 mb-3">
+  <button onclick="exportarRelatorioWhatsApp()" class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-1.5 px-3 rounded-lg text-xs flex items-center gap-1.5 transition cursor-pointer">
+    📱 Copiar / Enviar WhatsApp
+  </button>
+  <button onclick="exportarRelatorioPDF()" class="bg-red-600 hover:bg-red-700 text-white font-bold py-1.5 px-3 rounded-lg text-xs flex items-center gap-1.5 transition cursor-pointer">
+    📄 Gerar PDF Executivo
+  </button>
+</div>
             <div id="container-ia-insights" class="space-y-2.5 text-xs">
             </div>
           </div>

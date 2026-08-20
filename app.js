@@ -1015,3 +1015,115 @@ function renderizarInsightsIA(listaAnalise) {
     container.appendChild(card);
   });
 }
+
+// ==========================================
+// EXPORTAÇÃO DE RELATÓRIO (WHATSAPP & PDF)
+// ==========================================
+
+function gerarTextoRelatorioExecutivo() {
+  const hoje = new Date();
+  const dataHojeStr = hoje.toLocaleDateString('pt-BR');
+  const chaveMesAtual = `${String(hoje.getMonth() + 1).padStart(2, '0')}-${hoje.getFullYear()}`;
+
+  const recOrcTotal = Object.values(receitasOrcadas[chaveMesAtual] || {}).reduce((a, b) => a + b, 0);
+  const recRealTotal = Object.values(receitasRealizadas[chaveMesAtual] || {}).reduce((a, b) => a + b, 0);
+  
+  const reqLancTotal = lancamentos.reduce((acc, item) => {
+    const p = item.data.split('-');
+    if (parseInt(p[1]) === (hoje.getMonth() + 1) && parseInt(p[0]) === hoje.getFullYear()) {
+      return acc + item.valor;
+    }
+    return acc;
+  }, 0);
+
+  const cmvRealPct = recRealTotal > 0 ? (reqLancTotal / recRealTotal) * 100 : 0;
+  const META_CMV = 23.0;
+  const saving = recRealTotal * ((META_CMV - cmvRealPct) / 100);
+
+  let texto = `📊 *RESUMO EXECUTIVO - CONTROLADORIA DRE*\n`;
+  texto += `📅 *Data:* ${dataHojeStr}\n`;
+  texto += `-----------------------------------\n\n`;
+  
+  texto += `📌 *PANORAMA GERAL*\n`;
+  texto += `• *CMV Realizado:* ${cmvRealPct.toFixed(1)}% (Meta: ${META_CMV.toFixed(1)}%)\n`;
+  texto += `• *Saving Estimado:* R$ ${formatarMoedaBR(saving)}\n`;
+  texto += `• *Total Requisitado:* R$ ${formatarMoedaBR(reqLancTotal)}\n\n`;
+
+  texto += `🚨 *ALERTAS DA IA & DEPARTAMENTOS*\n`;
+
+  // Captura cada card da IA separando titulo de detalhes
+  const container = document.getElementById('container-ia-insights') || document.getElementById('containerInsightsIA');
+  if (container) {
+    const cards = container.children;
+    Array.from(cards).forEach((card) => {
+      const textContent = card.innerText || '';
+      if (!textContent || textContent.includes('PANORAMA FINANCEIRO')) return;
+
+      // Separa o texto pelas quebras de linha reais do card
+      const linhas = textContent.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+      
+      if (linhas.length > 0) {
+        const titulo = linhas[0];
+        const detalhes = linhas.slice(1).join('\n');
+
+        texto += `\n*${titulo}*\n${detalhes}\n`;
+      }
+    });
+  }
+
+  texto += `\n-----------------------------------\n`;
+  texto += `_Relatório gerado automaticamente pelo Sistema de Gestão._`;
+
+  return texto;
+}
+
+// 📱 EXPORTAR PARA WHATSAPP
+function exportarRelatorioWhatsApp() {
+  const texto = gerarTextoRelatorioExecutivo();
+  const url = `https://api.whatsapp.com/send?text=${encodeURIComponent(texto)}`;
+  window.open(url, '_blank');
+}
+
+// 📄 EXPORTAR PARA PDF (VERSÃO FINAL 100% LIMPA)
+function exportarRelatorioPDF() {
+  const { jsPDF } = window.jspdf;
+  if (!jsPDF) {
+    alert("Biblioteca jsPDF não carregada. Verifique a inclusão da tag <script>.");
+    return;
+  }
+
+  const doc = new jsPDF();
+
+  // Tratamento completo: remove emojis, caracteres especiais não-latinos e símbolos estranhos de renderização
+  let textoLimpo = gerarTextoRelatorioExecutivo()
+    .replace(/\*/g, '') // Remove negritos do WhatsApp
+    .replace(/[^\x00-\x7F\xC0-\xFF\n\r\t \-.:,()%/$R]/g, '') // Mantém apenas caracteres latinos (acentos, R$, números, pontuação)
+    .replace(/[–—]/g, '-') // Substitui travessões por hífen
+    .replace(/•/g, '-');  // Substitui bullets por hífen
+
+  const linhas = doc.splitTextToSize(textoLimpo, 180);
+
+  doc.setFont("Helvetica", "bold");
+  doc.setFontSize(13);
+  doc.text("RELATORIO EXECUTIVO DE AUDITORIA E INSIGHTS", 15, 15);
+
+  doc.setFont("Helvetica", "normal");
+  doc.setFontSize(9.5);
+  
+  let y = 24;
+  linhas.forEach((linha) => {
+    const linhaFormatada = linha.trim();
+    if (linhaFormatada !== '') {
+      if (y > 280) {
+        doc.addPage();
+        y = 15;
+      }
+      doc.text(linhaFormatada, 15, y);
+      y += 5.5;
+    }
+  });
+
+  const hoje = new Date();
+  const nomeArquivo = `Relatorio_Executivo_${hoje.getFullYear()}_${hoje.getMonth() + 1}.pdf`;
+  doc.save(nomeArquivo);
+}
