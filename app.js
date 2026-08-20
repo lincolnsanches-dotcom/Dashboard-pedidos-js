@@ -694,6 +694,7 @@ function atualizarGraficos() {
   const valoresGastos = [];
   const valoresTetos = [];
   const coresGastos = [];
+  const cmvDeptos = []; // Armazena o CMV individual do departamento
 
   const analiseIA = [];
 
@@ -707,14 +708,15 @@ function atualizarGraficos() {
       valoresGastos.push(gasto);
       valoresTetos.push(despOrc);
 
+      const cmvLocal = recReal > 0 ? ((gasto / recReal) * 100) : 0;
+      cmvDeptos.push(cmvLocal);
+
       let percConsumidoDesp = 0;
       if (despOrc > 0) {
         percConsumidoDesp = (gasto / despOrc) * 100;
       } else if (gasto > 0) {
         percConsumidoDesp = 100;
       }
-
-      const cmvLocal = recReal > 0 ? ((gasto / recReal) * 100) : 0;
       
       percentuaisReais.push(percConsumidoDesp);
       percentuaisExibicaoBarra.push(Math.min(100, parseFloat(percConsumidoDesp.toFixed(1))));
@@ -774,7 +776,7 @@ function atualizarGraficos() {
         responsive: true,
         maintainAspectRatio: false,
         layout: {
-          padding: { right: 180 }
+          padding: { right: 230 }
         },
         plugins: {
           legend: { 
@@ -798,16 +800,16 @@ function atualizarGraficos() {
                 const percReal = percentuaisReais[ctx.dataIndex];
                 const gasto = valoresGastos[ctx.dataIndex];
                 const teto = valoresTetos[ctx.dataIndex];
+                const cmv = cmvDeptos[ctx.dataIndex];
+
+                const textoCMV = cmv > 0 ? ` | CMV: ${cmv.toFixed(1)}%` : ' | CMV: N/A';
 
                 if (teto === 0 && gasto > 0) {
-                  return `🚨 Sem Teto (${formatarK(gasto)})`;
+                  return `🚨 Sem Teto (${formatarK(gasto)})${textoCMV}`;
                 }
 
-                if (percReal > 100) {
-                  return `🚨 ${percReal.toFixed(1)}% (${formatarK(gasto)} / ${formatarK(teto)})`;
-                }
-
-                return `${percReal.toFixed(1)}% (${formatarK(gasto)} / ${formatarK(teto)})`;
+                const alertaEstouro = percReal > 100 ? '🚨 ' : '';
+                return `${alertaEstouro}${percReal.toFixed(1)}% (${formatarK(gasto)} / ${formatarK(teto)})${textoCMV}`;
               }
               return '';
             }
@@ -1059,7 +1061,6 @@ function gerarTextoRelatorioExecutivo() {
       const textContent = card.innerText || '';
       if (!textContent || textContent.includes('PANORAMA FINANCEIRO')) return;
 
-      // Separa o texto pelas quebras de linha reais do card
       const linhas = textContent.split('\n').map(l => l.trim()).filter(l => l.length > 0);
       
       if (linhas.length > 0) {
@@ -1094,12 +1095,11 @@ function exportarRelatorioPDF() {
 
   const doc = new jsPDF();
 
-  // Tratamento completo: remove emojis, caracteres especiais não-latinos e símbolos estranhos de renderização
   let textoLimpo = gerarTextoRelatorioExecutivo()
-    .replace(/\*/g, '') // Remove negritos do WhatsApp
-    .replace(/[^\x00-\x7F\xC0-\xFF\n\r\t \-.:,()%/$R]/g, '') // Mantém apenas caracteres latinos (acentos, R$, números, pontuação)
-    .replace(/[–—]/g, '-') // Substitui travessões por hífen
-    .replace(/•/g, '-');  // Substitui bullets por hífen
+    .replace(/\*/g, '')
+    .replace(/[^\x00-\x7F\xC0-\xFF\n\r\t \-.:,()%/$R]/g, '')
+    .replace(/[–—]/g, '-')
+    .replace(/•/g, '-');
 
   const linhas = doc.splitTextToSize(textoLimpo, 180);
 
