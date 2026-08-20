@@ -886,6 +886,11 @@ function renderizarInsightsIA(listaAnalise) {
     container.appendChild(cardGlobal);
   }
 
+  // Se o módulo de auditoria estiver ativo, executa para reinserir o alerta DRE no topo
+  if (typeof verificarDivergenciaDRE_IA === 'function') {
+    verificarDivergenciaDRE_IA();
+  }
+
   const estourados = listaAnalise.filter(i => i.saldo < 0);
   const atencao = listaAnalise.filter(i => i.saldo >= 0 && i.percConsumidoDesp >= 80);
   const folga = listaAnalise.filter(i => i.saldo > 0).sort((a, b) => b.saldo - a.saldo);
@@ -903,15 +908,30 @@ function renderizarInsightsIA(listaAnalise) {
         `;
       }
 
+      // Identifica se o setor não possui orçado (despOrc === 0)
+      const semOrcamentoPrevisto = item.despOrc === 0;
+
+      const tituloCard = semOrcamentoPrevisto 
+        ? "⚠️ LANÇAMENTO SEM ORÇAMENTO PREVISTO" 
+        : "🚨 DESPESA EXCEDIDA";
+
+      const badgeTexto = semOrcamentoPrevisto 
+        ? "Sem Teto Aprovado" 
+        : `${item.percConsumidoDesp.toFixed(1)}% do Orçado`;
+
+      const mensagemDetalhe = semOrcamentoPrevisto 
+        ? `<strong>${item.depto}</strong> registrou <strong>R$ ${formatarMoedaBR(item.gasto)}</strong> em requisições, mas <strong>não possui orçamento previsto (R$ 0,00)</strong> cadastrado na DRE.`
+        : `<strong>${item.depto}</strong> excedeu o orçado em <strong>R$ ${formatarMoedaBR(Math.abs(item.saldo))}</strong>.`;
+
       const card = document.createElement('div');
       card.className = "p-2.5 rounded-lg bg-red-50 border border-red-200 text-xs text-red-800 shadow-sm mb-2";
       card.innerHTML = `
         <div class="flex justify-between items-start">
-          <span class="font-bold text-red-700">🚨 DESPESA EXCEDIDA</span>
-          <span class="text-[10px] bg-red-200 text-red-800 px-1.5 py-0.5 rounded font-bold">${item.percConsumidoDesp.toFixed(1)}% do Orçado</span>
+          <span class="font-bold text-red-700">${tituloCard}</span>
+          <span class="text-[10px] bg-red-200 text-red-800 px-1.5 py-0.5 rounded font-bold">${badgeTexto}</span>
         </div>
         <p class="mt-1 font-semibold text-gray-800">
-          <strong>${item.depto}</strong> excedeu o orçado em <strong>R$ ${formatarMoedaBR(Math.abs(item.saldo))}</strong>.
+          ${mensagemDetalhe}
         </p>
         <p class="text-[10px] text-gray-600 mt-0.5">CMV sobre Receita Real: <strong>${item.cmvLocal.toFixed(1)}%</strong></p>
         ${sugestaoHTML}
