@@ -729,11 +729,13 @@ function atualizarGraficos() {
 
       analiseIA.push({
         depto,
+        nome: depto,
         gasto,
         despOrc,
         recReal,
         cmvLocal,
         saldo: despOrc - gasto,
+        restante: despOrc - gasto,
         percConsumidoDesp
       });
     }
@@ -834,14 +836,21 @@ function atualizarGraficos() {
   renderizarInsightsIA(analiseIA);
 }
 
+// ==========================================
+// FUNÇÃO DE INSIGHTS E INTELIGÊNCIA ARTIFICIAL
+// ==========================================
 function renderizarInsightsIA(listaAnalise) {
-  const container = document.getElementById('container-ia-insights');
+  const container = document.getElementById('container-ia-insights') || document.getElementById('containerInsightsIA') || document.querySelector('.space-y-3');
   if (!container) return;
 
   container.innerHTML = '';
 
   const hoje = new Date();
   const chaveMesAtual = `${String(hoje.getMonth() + 1).padStart(2, '0')}-${hoje.getFullYear()}`;
+  
+  // Variáveis de tempo para cálculo do Run-Rate
+  const diaAtual = hoje.getDate();
+  const diasNoMes = new Date(hoje.getFullYear(), hoje.getMonth() + 1, 0).getDate();
   
   const recOrcTotal = Object.values(receitasOrcadas[chaveMesAtual] || {}).reduce((a, b) => a + b, 0);
   const recRealTotal = Object.values(receitasRealizadas[chaveMesAtual] || {}).reduce((a, b) => a + b, 0);
@@ -855,12 +864,13 @@ function renderizarInsightsIA(listaAnalise) {
     return acc;
   }, 0);
 
+  const META_CMV_ALVO = 23.0;
+
+  // 0. PANORAMA GLOBAL
   if (recOrcTotal > 0 || despOrcTotal > 0) {
     const pctReceita = recOrcTotal > 0 ? ((recRealTotal / recOrcTotal) * 100).toFixed(1) : '0.0';
-    const cmvMetaPct = recOrcTotal > 0 ? (despOrcTotal / recOrcTotal) * 100 : 0;
     const cmvRealPct = recRealTotal > 0 ? (reqLancTotal / recRealTotal) * 100 : 0;
 
-    const META_CMV_ALVO = 23.0;
     const pontosEconomizados = META_CMV_ALVO - cmvRealPct;
     const savingPontosRS = recRealTotal * (pontosEconomizados / 100);
 
@@ -871,7 +881,7 @@ function renderizarInsightsIA(listaAnalise) {
     cardGlobal.className = "p-2.5 rounded-lg bg-blue-50 border border-blue-200 text-xs text-blue-900 shadow-sm mb-2";
     cardGlobal.innerHTML = `
       <div class="font-bold text-blue-800 flex items-center justify-between mb-1">
-        <span class="flex items-center gap-1">📈 PANORAMA FINANCEIRO & SAVING (CMV)</span>
+        <span class="flex items-center gap-1">📊 PANORAMA FINANCEIRO & SAVING</span>
         <span class="${corBadgeSaving} px-1.5 py-0.5 rounded font-extrabold text-[10px]">
           💰 Saving: ${savingFormatado} (${pontosEconomizados.toFixed(1)} p.p. de folga)
         </span>
@@ -880,94 +890,128 @@ function renderizarInsightsIA(listaAnalise) {
         <div>• <strong>Meta Receita:</strong> ${pctReceita}% real.</div>
         <div>• <strong>CMV Realizado:</strong> ${cmvRealPct.toFixed(1)}%</div>
         <div>• <strong>Meta Operacional:</strong> ${META_CMV_ALVO.toFixed(1)}%</div>
-        <div>• <strong>Economia (Saving):</strong> <strong class="text-emerald-700">${savingFormatado}</strong></div>
+        <div>• <strong>Economia (Saving):</strong> <strong class="${savingPontosRS >= 0 ? 'text-emerald-700' : 'text-red-700'}">${savingFormatado}</strong></div>
       </div>
     `;
     container.appendChild(cardGlobal);
   }
 
-  // Se o módulo de auditoria estiver ativo, executa para reinserir o alerta DRE no topo
-  if (typeof verificarDivergenciaDRE_IA === 'function') {
-    verificarDivergenciaDRE_IA();
-  }
+  // Prepara projeção de ritmo
+  listaAnalise.forEach(item => {
+    item.mediaDiaria = item.gasto / (diaAtual || 1);
+    item.projecaoFimMes = item.mediaDiaria * diasNoMes;
+    item.percProjecao = item.despOrc > 0 ? (item.projecaoFimMes / item.despOrc) * 100 : 0;
+  });
 
-  const estourados = listaAnalise.filter(i => i.saldo < 0);
-  const atencao = listaAnalise.filter(i => i.saldo >= 0 && i.percConsumidoDesp >= 80);
-  const folga = listaAnalise.filter(i => i.saldo > 0).sort((a, b) => b.saldo - a.saldo);
+  const folga = listaAnalise.filter(i => i.restante > 0).sort((a, b) => b.restante - a.restante);
 
-  if (estourados.length > 0) {
-    estourados.forEach(item => {
-      let sugestaoHTML = '';
-      if (folga.length > 0) {
-        const doador = folga[0];
-        sugestaoHTML = `
-          <div class="mt-1.5 pt-1.5 border-t border-red-200/60 text-[10px] text-red-900 font-medium">
-            💡 <strong>Remanejamento Sugerido:</strong> Transferir até 
-            <strong>R$ ${formatarMoedaBR(Math.abs(item.saldo))}</strong> do saldo restante de <strong>${doador.depto}</strong> (Sobra: R$ ${formatarMoedaBR(doador.saldo)}).
-          </div>
-        `;
-      }
-
-      // Identifica se o setor não possui orçado (despOrc === 0)
-      const semOrcamentoPrevisto = item.despOrc === 0;
-
-      const tituloCard = semOrcamentoPrevisto 
-        ? "⚠️ LANÇAMENTO SEM ORÇAMENTO PREVISTO" 
-        : "🚨 DESPESA EXCEDIDA";
-
-      const badgeTexto = semOrcamentoPrevisto 
-        ? "Sem Teto Aprovado" 
-        : `${item.percConsumidoDesp.toFixed(1)}% do Orçado`;
-
-      const mensagemDetalhe = semOrcamentoPrevisto 
-        ? `<strong>${item.depto}</strong> registrou <strong>R$ ${formatarMoedaBR(item.gasto)}</strong> em requisições, mas <strong>não possui orçamento previsto (R$ 0,00)</strong> cadastrado na DRE.`
-        : `<strong>${item.depto}</strong> excedeu o orçado em <strong>R$ ${formatarMoedaBR(Math.abs(item.saldo))}</strong>.`;
-
-      const card = document.createElement('div');
-      card.className = "p-2.5 rounded-lg bg-red-50 border border-red-200 text-xs text-red-800 shadow-sm mb-2";
-      card.innerHTML = `
-        <div class="flex justify-between items-start">
-          <span class="font-bold text-red-700">${tituloCard}</span>
-          <span class="text-[10px] bg-red-200 text-red-800 px-1.5 py-0.5 rounded font-bold">${badgeTexto}</span>
-        </div>
-        <p class="mt-1 font-semibold text-gray-800">
-          ${mensagemDetalhe}
-        </p>
-        <p class="text-[10px] text-gray-600 mt-0.5">CMV sobre Receita Real: <strong>${item.cmvLocal.toFixed(1)}%</strong></p>
-        ${sugestaoHTML}
-      `;
-      container.appendChild(card);
-    });
-  }
-
-  if (atencao.length > 0) {
-    atencao.forEach(item => {
-      const card = document.createElement('div');
-      card.className = "p-2.5 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-900 shadow-sm mb-2";
-      card.innerHTML = `
-        <div class="flex justify-between items-start">
-          <span class="font-bold text-amber-800">⚠️ ATENÇÃO AO ORÇAMENTO</span>
-          <span class="text-[10px] bg-amber-200 text-amber-900 px-1.5 py-0.5 rounded font-bold">${item.percConsumidoDesp.toFixed(1)}%</span>
-        </div>
-        <p class="mt-1 text-amber-950 font-medium">
-          <strong>${item.depto}</strong> atingiu ${item.percConsumidoDesp.toFixed(1)}% do orçado. Saldo restante: R$ ${formatarMoedaBR(item.saldo)}.
-        </p>
-      `;
-      container.appendChild(card);
-    });
-  }
-
-  if (estourados.length === 0 && atencao.length === 0) {
+  // 🚨 NÍVEL 1 (CRÍTICO): Estouro de teto ou gasto sem orçamento
+  // A) Sem Orçamento Previsto
+  listaAnalise.filter(i => i.despOrc === 0 && i.gasto > 0).forEach(item => {
+    const doador = folga.find(b => b.restante >= item.gasto && b.depto !== item.depto);
     const card = document.createElement('div');
-    card.className = "p-2.5 rounded-lg bg-emerald-50 border border-emerald-200 text-xs text-emerald-800 shadow-sm";
+    card.className = "p-2.5 rounded-lg bg-red-50 border border-red-200 text-xs text-red-800 shadow-sm mb-2";
     card.innerHTML = `
-      <div class="flex items-center gap-1 font-bold text-emerald-700">
-        <span>✅</span> OPERAÇÃO ORÇAMENTÁRIA SAUDÁVEL
+      <div class="flex justify-between items-start">
+        <span class="font-bold text-red-700">🚨 NÍVEL 1: LANÇAMENTO SEM ORÇAMENTO</span>
+        <span class="text-[10px] bg-red-200 text-red-800 px-1.5 py-0.5 rounded font-bold">Sem Teto Aprovado</span>
       </div>
-      <p class="mt-1 text-emerald-900">
-        Todos os setores operam dentro dos limites orçados de insumos.
+      <p class="mt-1 font-semibold text-gray-800">
+        <strong>${item.depto}</strong> registrou <strong>R$ ${formatarMoedaBR(item.gasto)}</strong> em requisições, mas não possui orçamento na DRE.
+      </p>
+      ${doador ? `
+        <div class="mt-1.5 pt-1.5 border-t border-red-200/60 text-[10px] text-red-900 font-medium">
+          💡 <strong>Remanejamento Sugerido:</strong> Transferir até R$ ${formatarMoedaBR(item.gasto)} do saldo de <strong>${doador.depto}</strong> (Sobra: R$ ${formatarMoedaBR(doador.restante)}).
+        </div>
+      ` : ''}
+    `;
+    container.appendChild(card);
+  });
+
+  // B) Excedeu o Orçado
+  listaAnalise.filter(i => i.despOrc > 0 && i.gasto > i.despOrc).forEach(item => {
+    const excesso = item.gasto - item.despOrc;
+    const doador = folga.find(b => b.restante >= excesso && b.depto !== item.depto);
+    const perc = ((item.gasto / item.despOrc) * 100).toFixed(1);
+    
+    const card = document.createElement('div');
+    card.className = "p-2.5 rounded-lg bg-red-50 border border-red-200 text-xs text-red-800 shadow-sm mb-2";
+    card.innerHTML = `
+      <div class="flex justify-between items-start">
+        <span class="font-bold text-red-700">🚨 NÍVEL 1: DESPESA EXCEDIDA</span>
+        <span class="text-[10px] bg-red-200 text-red-800 px-1.5 py-0.5 rounded font-bold">${perc}% do Orçado</span>
+      </div>
+      <p class="mt-1 font-semibold text-gray-800">
+        <strong>${item.depto}</strong> excedeu o orçado em <strong>R$ ${formatarMoedaBR(excesso)}</strong>.
+      </p>
+      ${doador ? `
+        <div class="mt-1.5 pt-1.5 border-t border-red-200/60 text-[10px] text-red-900 font-medium">
+          💡 <strong>Remanejamento Sugerido:</strong> Transferir até R$ ${formatarMoedaBR(excesso)} do saldo de <strong>${doador.depto}</strong> (Sobra: R$ ${formatarMoedaBR(doador.restante)}).
+        </div>
+      ` : ''}
+    `;
+    container.appendChild(card);
+  });
+
+  // ⚠️ NÍVEL 2 (AVISO): Consumo entre 80% e 99.9% do teto
+  listaAnalise.filter(i => {
+    const perc = i.despOrc > 0 ? (i.gasto / i.despOrc) * 100 : 0;
+    return perc >= 80 && perc <= 99.9;
+  }).forEach(item => {
+    const perc = ((item.gasto / item.despOrc) * 100).toFixed(1);
+    const card = document.createElement('div');
+    card.className = "p-2.5 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-900 shadow-sm mb-2";
+    card.innerHTML = `
+      <div class="flex justify-between items-start">
+        <span class="font-bold text-amber-800">⚠️ NÍVEL 2: ALERTA DE CONSUMO ELEVADO</span>
+        <span class="text-[10px] bg-amber-200 text-amber-900 px-1.5 py-0.5 rounded font-bold">${perc}% do Teto</span>
+      </div>
+      <p class="mt-1 font-medium">
+        O setor <strong>${item.depto}</strong> atingiu <strong>${perc}%</strong> do teto orçamentário. Restam apenas <strong>R$ ${formatarMoedaBR(item.restante)}</strong>.
       </p>
     `;
     container.appendChild(card);
-  }
+  });
+
+  // 📈 NÍVEL 3 (TENDÊNCIA): Ritmo de gasto (Run-Rate)
+  listaAnalise.filter(i => 
+    i.restante >= 0 && 
+    i.despOrc > 0 && 
+    i.percProjecao > 110 && 
+    (i.gasto / i.despOrc) > 0.20
+  ).sort((a, b) => b.percProjecao - a.percProjecao).slice(0, 2).forEach(item => {
+    const card = document.createElement('div');
+    card.className = "p-2.5 rounded-lg bg-indigo-50 border border-indigo-200 text-xs text-indigo-900 shadow-sm mb-2";
+    card.innerHTML = `
+      <div class="flex justify-between items-start">
+        <span class="font-bold text-indigo-800">📈 NÍVEL 3: PROJEÇÃO DE RITMO (RUN-RATE)</span>
+        <span class="text-[10px] bg-indigo-200 text-indigo-900 px-1.5 py-0.5 rounded font-bold">Tendência: ${item.percProjecao.toFixed(1)}%</span>
+      </div>
+      <p class="mt-1 font-medium">
+        No ritmo atual (média de R$ ${formatarMoedaBR(item.mediaDiaria)}/dia), <strong>${item.depto}</strong> atingirá <strong>R$ ${formatarMoedaBR(item.projecaoFimMes)}</strong> no fim do mês. Recomenda-se desacelerar compras.
+      </p>
+    `;
+    container.appendChild(card);
+  });
+
+  // 🎯 NÍVEL 4 (ELOGIO / SAVING): Oportunidade de Margem
+  listaAnalise.filter(i => 
+    i.recReal > 1000 && 
+    i.gasto > 0 && 
+    i.cmvLocal >= 5 && 
+    i.cmvLocal <= (META_CMV_ALVO - 3)
+  ).sort((a, b) => a.cmvLocal - b.cmvLocal).slice(0, 2).forEach(item => {
+    const card = document.createElement('div');
+    card.className = "p-2.5 rounded-lg bg-teal-50 border border-teal-200 text-xs text-teal-900 shadow-sm mb-2";
+    card.innerHTML = `
+      <div class="flex justify-between items-start">
+        <span class="font-bold text-teal-800">🎯 NÍVEL 4: OPORTUNIDADE DE MARGEM & SAVING</span>
+        <span class="text-[10px] bg-teal-200 text-teal-900 px-1.5 py-0.5 rounded font-bold">CMV: ${item.cmvLocal.toFixed(1)}%</span>
+      </div>
+      <p class="mt-1 font-medium">
+        O setor <strong>${item.depto}</strong> apresentou CMV de apenas <strong>${item.cmvLocal.toFixed(1)}%</strong> (meta: ${META_CMV_ALVO}%). Há margem financeira para ações promocionais de vendas.
+      </p>
+    `;
+    container.appendChild(card);
+  });
 }
