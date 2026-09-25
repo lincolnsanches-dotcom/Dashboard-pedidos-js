@@ -717,6 +717,41 @@ function formatarK(valor) {
   return 'R$ ' + valor.toLocaleString('pt-BR');
 }
 
+// ================================================================
+// CONTROLE DE MÃO DE OBRA (MO) - NÃO ENTRA NO CMV DE INSUMOS
+// A Mão de Obra continua sendo acompanhada separadamente no Dashboard
+// e também aparece separada nos relatórios de WhatsApp e PDF.
+// ================================================================
+function ehDepartamentoMO(depto) {
+  const nome = String(depto || '').trim().toLowerCase();
+  return nome === 'mão de obra (serviços de terceiros)' ||
+         nome === 'mao de obra (servicos de terceiros)' ||
+         nome.includes('mão de obra') ||
+         nome.includes('mao de obra') ||
+         nome.startsWith('mo extra');
+}
+
+function obterTotaisMaoDeObra(dados) {
+  const totais = {};
+  let total = 0;
+
+  (dados || []).forEach(item => {
+    if (ehDepartamentoMO(item.departamento)) {
+      const valor = parseFloat(item.valor) || 0;
+      totais[item.departamento] = (totais[item.departamento] || 0) + valor;
+      total += valor;
+    }
+  });
+
+  return { totais, total };
+}
+
+function obterOrcamentoMaoDeObra(chaveMes) {
+  const dadosOrc = despesasOrcadas[chaveMes] || {};
+  return parseFloat(dadosOrc['Mão de Obra (Serviços de Terceiros)']) ||
+         parseFloat(dadosOrc['Mao de Obra (Servicos de Terceiros)']) || 0;
+}
+
 function atualizarGraficos() {
   const modoDash = document.getElementById('dash-filtro-periodo')?.value || 'mes_atual';
   const { inicio, fim } = obterIntervaloSemana(new Date());
@@ -735,23 +770,24 @@ function atualizarGraficos() {
   });
 
   const totaisPorDepto = {};
-  let totalGeralInsumos = 0; // Somente Insumos/Mercadorias
+  let totalGeral = 0;
+  let totalMODashboard = 0;
 
   dadosDash.forEach(item => {
-    const deptoLower = item.departamento.toLowerCase();
-    const ehMO = item.departamento === "Mão de Obra (Serviços de Terceiros)" || 
-                 deptoLower.startsWith('mo extra') || 
-                 deptoLower.includes('mão de obra') || 
-                 deptoLower.includes('mao de obra');
+    const valorItem = parseFloat(item.valor) || 0;
+    totaisPorDepto[item.departamento] = (totaisPorDepto[item.departamento] || 0) + valorItem;
 
-    // Mapeia para os gráficos/totais por setor
-    totaisPorDepto[item.departamento] = (totaisPorDepto[item.departamento] || 0) + item.valor;
-
-    // Acumula no Total Geral APENAS se NÃO for Mão de Obra
-    if (!ehMO) {
-      totalGeralInsumos += item.valor;
+    // IMPORTANTE: MO não compõe o CMV de insumos do Dashboard.
+    // O valor é acumulado separadamente para o gráfico/relatório de MO.
+    if (ehDepartamentoMO(item.departamento)) {
+      totalMODashboard += valorItem;
+    } else {
+      totalGeral += valorItem;
     }
   });
+
+  // Guarda o total de MO para uso no bloco dedicado, sem contaminar o CMV.
+  const dadosMODashboard = obterTotaisMaoDeObra(dadosDash);
 
   const hoje = new Date();
   const chaveMesAtual = `${String(hoje.getMonth() + 1).padStart(2, '0')}-${hoje.getFullYear()}`;
@@ -764,15 +800,13 @@ function atualizarGraficos() {
     receitaRealizadaHotel += recRealDoMes[d] || 0;
   });
 
-  // Atualiza o Card de Custo Total excluindo MO
   const elTotal = document.getElementById('dash-card-total');
-  if (elTotal) elTotal.innerText = "R$ " + formatarMoedaBR(totalGeralInsumos);
+  if (elTotal) elTotal.innerText = "R$ " + formatarMoedaBR(totalGeral);
   
-  // Atualiza % CMV
   const elPerc = document.getElementById('dash-card-percentual');
   if (elPerc) {
     if (receitaRealizadaHotel > 0) {
-      const cmvReal = ((totalGeralInsumos / receitaRealizadaHotel) * 100).toFixed(1);
+      const cmvReal = ((totalGeral / receitaRealizadaHotel) * 100).toFixed(1);
       elPerc.innerText = `${cmvReal}%`;
       elPerc.className = `text-xl font-extrabold mt-0.5 ${cmvReal > 29.0 ? 'text-red-400' : 'text-emerald-400'}`;
     } else {
@@ -781,18 +815,16 @@ function atualizarGraficos() {
     }
   }
 
-  // Maior Setor (ignorando Mão de Obra)
+  // Setor com maior gasto considera SOMENTE materiais/insumos.
+  // A Mão de Obra fica totalmente separada do ranking de setores.
   let topDepto = '-';
   let maiorValor = 0;
   for (let depto in totaisPorDepto) {
-    const dLower = depto.toLowerCase();
-    const ehMO = depto === "Mão de Obra (Serviços de Terceiros)" || 
-                 dLower.startsWith('mo extra') || 
-                 dLower.includes('mão de obra') || 
-                 dLower.includes('mao de obra');
+    if (ehDepartamentoMO(depto)) continue;
 
-    if (!ehMO && totaisPorDepto[depto] > maiorValor) {
-      maiorValor = totaisPorDepto[depto];
+    const valorDepto = totaisPorDepto[depto] || 0;
+    if (valorDepto > maiorValor) {
+      maiorValor = valorDepto;
       topDepto = depto;
     }
   }
@@ -954,121 +986,252 @@ function atualizarGraficos() {
     });
   }
 
-  // Renderiza Gráfico Dedicado de Mão de Obra (3.12.205) com Totalizador Claro
-  const canvasMO = document.getElementById('chartMaoDeObra');
-  if (canvasMO) {
-    const deptoMO = "Mão de Obra (Serviços de Terceiros)";
-    const tetoMO = despOrcDoMes[deptoMO] || 0;
+  // ================================================================
+  // GARANTE O CARD/GRÁFICO DE MÃO DE OBRA NO DASHBOARD
+  // O gráfico de MO fica SOMENTE no Dashboard, logo abaixo do gráfico
+  // principal de materiais e na mesma coluna. Nunca é colocado na aba
+  // Definição de Teto.
+  // ================================================================
+  function garantirGraficoMaoDeObraNoDashboard() {
+    const abaDashboard = document.getElementById('aba-dashboard');
+    const abaBudgets = document.getElementById('aba-budgets');
+    const canvasPrincipal = document.getElementById('chartDeptos');
+    const containerIA = document.getElementById('container-ia-insights') || document.getElementById('containerInsightsIA');
 
-    const labelsMO = [];
-    const valoresMO = [];
-    let gastoMOTotal = 0;
+    if (!abaDashboard || !canvasPrincipal) return null;
 
-    departamentosLista.forEach(key => {
-      const keyLower = key.toLowerCase();
-      if (keyLower.startsWith('mo extra') || key === deptoMO) {
-        const valorSub = totaisPorDepto[key] || 0;
-        if (valorSub > 0 && key !== deptoMO) {
+    // Localiza o card IMEDIATO que contém o gráfico principal.
+    // É importante parar no primeiro .bg-slate-800: subir demais na árvore
+    // faria o cardPrincipal virar o próprio Dashboard e jogaria a MO para
+    // fora da aba, no rodapé da página.
+    let cardPrincipal = canvasPrincipal.closest('.bg-slate-800');
+    if (!cardPrincipal) {
+      cardPrincipal = canvasPrincipal.parentElement;
+    }
+
+    // Procura o grid que contém o card principal e o painel da IA.
+    // Esse é o ponto correto para inserir a MO na linha seguinte, sem
+    // empurrá-la para o rodapé da página.
+    let gradeDashboard = null;
+    if (containerIA) {
+      const ancestrais = [];
+      let a = cardPrincipal;
+      while (a && a !== abaDashboard) {
+        ancestrais.push(a);
+        a = a.parentElement;
+      }
+
+      for (const anc of ancestrais) {
+        if (!anc.contains(containerIA)) continue;
+        const estilo = window.getComputedStyle(anc);
+        if (estilo.display === 'grid') {
+          gradeDashboard = anc;
+          break;
+        }
+      }
+    }
+
+    if (!gradeDashboard) {
+      let a = cardPrincipal.parentElement;
+      while (a && a !== abaDashboard) {
+        const estilo = window.getComputedStyle(a);
+        if (estilo.display === 'grid' && a.children.length >= 2) {
+          gradeDashboard = a;
+          break;
+        }
+        a = a.parentElement;
+      }
+    }
+
+    // Recupera ou cria o card da MO.
+    let cardMO = document.getElementById('card-grafico-mo');
+    let canvasMO = document.getElementById('chartMaoDeObra');
+
+    if (cardMO && !abaDashboard.contains(cardMO)) {
+      abaDashboard.appendChild(cardMO);
+    }
+
+    if (!cardMO && canvasMO) {
+      cardMO = canvasMO.closest('#card-grafico-mo') || canvasMO.parentElement;
+    }
+
+    if (!cardMO) {
+      cardMO = document.createElement('div');
+      cardMO.id = 'card-grafico-mo';
+      cardMO.className = 'bg-slate-800 rounded-xl p-4 mt-4 shadow-lg border border-slate-700';
+      cardMO.innerHTML = `
+        <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-2 mb-3">
+          <div>
+            <h3 class="text-sm font-bold text-white">🧑‍🔧 Mão de Obra — Orçado x Lançado</h3>
+            <p class="text-[11px] text-slate-400 mt-0.5">Detalhamento das requisições de MO por função/setor.</p>
+          </div>
+          <div id="mo-total-summary" class="text-xs font-bold text-slate-300"></div>
+        </div>
+        <div class="mo-canvas-wrapper" style="position:relative; width:100%; min-height:180px;">
+          <canvas id="chartMaoDeObra"></canvas>
+        </div>
+      `;
+      canvasMO = cardMO.querySelector('#chartMaoDeObra');
+    }
+
+    if (!canvasMO) {
+      const wrapper = cardMO.querySelector('.mo-canvas-wrapper') || cardMO;
+      canvasMO = document.createElement('canvas');
+      canvasMO.id = 'chartMaoDeObra';
+      wrapper.appendChild(canvasMO);
+    }
+
+    // Remove o card da Definição de Teto, caso ainda esteja lá.
+    if (abaBudgets && abaBudgets.contains(cardMO)) {
+      abaBudgets.removeChild(cardMO);
+    }
+
+    // Posicionamento definitivo: mesma coluna do gráfico principal e linha
+    // seguinte no grid do Dashboard.
+    if (gradeDashboard) {
+      const colunaPrincipal = window.getComputedStyle(cardPrincipal).gridColumn;
+      if (colunaPrincipal && colunaPrincipal !== 'auto') {
+        cardMO.style.gridColumn = colunaPrincipal;
+      } else {
+        // Para Tailwind/grades responsivas em que o computed style não
+        // preserva a classe, força a coluna esquerda do Dashboard.
+        cardMO.style.gridColumn = '1 / span 8';
+      }
+      cardMO.style.gridRow = 'auto';
+      cardMO.style.width = '100%';
+      gradeDashboard.appendChild(cardMO);
+    } else {
+      // Fallback: coloca imediatamente depois do card do gráfico principal.
+      cardPrincipal.parentNode.insertBefore(cardMO, cardPrincipal.nextSibling);
+      cardMO.style.width = '100%';
+    }
+
+    // Remove qualquer posicionamento antigo que possa ter deixado o card
+    // fora do Dashboard.
+    if (!abaDashboard.contains(cardMO)) {
+      abaDashboard.appendChild(cardMO);
+    }
+
+    return canvasMO;
+  }
+
+  // Renderiza Gráfico Dedicado de Mão de Obra (3.12.205) com Totalizador Claro.
+  // Todo o bloco é protegido para que uma falha no gráfico de MO jamais
+  // impeça a renderização da Análise Avançada de IA.
+  try {
+    const canvasMO = garantirGraficoMaoDeObraNoDashboard();
+    if (canvasMO) {
+      const tetoMO = obterOrcamentoMaoDeObra(chaveMesAtual);
+
+      const labelsMO = [];
+      const valoresMO = [];
+      let gastoMOTotal = 0;
+
+      Object.keys(dadosMODashboard.totais).forEach(key => {
+        const valorSub = dadosMODashboard.totais[key] || 0;
+        if (valorSub > 0) {
           labelsMO.push(key);
           valoresMO.push(valorSub);
         }
-        if (key !== deptoMO) {
-          gastoMOTotal += valorSub;
-        }
+      });
+
+      gastoMOTotal = dadosMODashboard.total;
+
+      if (labelsMO.length === 0) {
+        labelsMO.push('Nenhum lançamento de MO');
+        valoresMO.push(0);
       }
-    });
 
-    if (labelsMO.length === 0) {
-      labelsMO.push(deptoMO);
-      valoresMO.push(0);
-    }
+      const percConsumidoTotal = tetoMO > 0 ? ((gastoMOTotal / tetoMO) * 100).toFixed(1) : '0.0';
+      const saldoResta = tetoMO - gastoMOTotal;
 
-    // Atualiza o título/subtítulo do card para mostrar claramente o Consumo Total vs Teto
-    const percConsumidoTotal = tetoMO > 0 ? ((gastoMOTotal / tetoMO) * 100).toFixed(1) : '0.0';
-    const saldoResta = tetoMO - gastoMOTotal;
+      const cardMO = canvasMO.closest('#card-grafico-mo');
+      const subHeader = document.getElementById('mo-total-summary') ||
+        cardMO?.querySelector('.mo-total-summary');
 
-    // Tenta localizar o título do card para injetar o resumo financeiro
-    const containerParent = canvasMO.closest('.card, .bg-slate-800, div');
-    if (containerParent) {
-      let subHeader = containerParent.querySelector('.mo-total-summary');
-      if (!subHeader) {
-        subHeader = document.createElement('div');
-        subHeader.className = 'mo-total-summary';
-        subHeader.style.cssText = 'font-size: 13px; font-weight: bold; margin-bottom: 12px; color: #cbd5e1;';
-        canvasMO.parentNode.insertBefore(subHeader, canvasMO);
+      if (subHeader) {
+        const corStatus = gastoMOTotal > tetoMO ? '#ef4444' : '#10b981';
+        subHeader.innerHTML = `
+          Consumo Total: <span style="color: ${corStatus}">R$ ${formatarMoedaBR(gastoMOTotal)} (${percConsumidoTotal}%)</span>
+          | Teto Orçado: <b>R$ ${formatarMoedaBR(tetoMO)}</b>
+          | Saldo: <span style="color: ${saldoResta < 0 ? '#ef4444' : '#10b981'}">R$ ${formatarMoedaBR(saldoResta)}</span>
+        `;
       }
-      
-      const corStatus = gastoMOTotal > tetoMO ? '#ef4444' : '#10b981';
-      subHeader.innerHTML = `
-        Consumo Total: <span style="color: ${corStatus}">R$ ${formatarMoedaBR(gastoMOTotal)} (${percConsumidoTotal}%)</span> 
-        | Teto Orçado: <b>R$ ${formatarMoedaBR(tetoMO)}</b> 
-        | Saldo: <span style="color: ${saldoResta < 0 ? '#ef4444' : '#10b981'}">R$ ${formatarMoedaBR(saldoResta)}</span>
-      `;
-    }
 
-    // Ajusta altura do canvas
-    const containerMO = canvasMO.parentElement;
-    if (containerMO) {
-      containerMO.style.height = `${Math.max(140, labelsMO.length * 40)}px`;
-    }
+      const containerMO = canvasMO.parentElement;
+      if (containerMO) {
+        containerMO.style.height = `${Math.max(180, labelsMO.length * 40)}px`;
+      }
 
-    // Correção do eixo X (R$ Duplicado no eixo)
-    if (chartMaoDeObra) chartMaoDeObra.destroy();
-    chartMaoDeObra = new Chart(canvasMO, {
-      type: 'bar',
-      data: {
-        labels: labelsMO,
-        datasets: [
-          {
+      // Se houver uma instância antiga do Chart.js usando esse canvas,
+      // destrói antes de criar a nova para evitar "Canvas is already in use".
+      if (typeof Chart !== 'undefined' && typeof Chart.getChart === 'function') {
+        const chartAnterior = Chart.getChart(canvasMO);
+        if (chartAnterior) chartAnterior.destroy();
+      }
+      if (chartMaoDeObra) {
+        try { chartMaoDeObra.destroy(); } catch (e) {}
+        chartMaoDeObra = null;
+      }
+
+      chartMaoDeObra = new Chart(canvasMO, {
+        type: 'bar',
+        data: {
+          labels: labelsMO,
+          datasets: [{
             label: 'Valor Lançado',
             data: valoresMO,
             backgroundColor: '#f59e0b',
             borderRadius: 4,
             barThickness: 16
-          }
-        ]
-      },
-      options: {
-        indexAxis: 'y',
-        responsive: true,
-        maintainAspectRatio: false,
-        layout: { padding: { right: 260 } },
-        plugins: {
-          legend: { display: false },
-          datalabels: {
-            font: { weight: 'bold', size: 11 },
-            anchor: 'end',
-            align: 'end',
-            offset: 8,
-            color: '#f8fafc',
-            formatter: (value) => {
-              const percSub = tetoMO > 0 ? ((value / tetoMO) * 100).toFixed(2) : '0.00';
-              return `R$ ${formatarMoedaBR(value)} (${percSub}%)`;
+          }]
+        },
+        options: {
+          indexAxis: 'y',
+          responsive: true,
+          maintainAspectRatio: false,
+          layout: { padding: { right: 260 } },
+          plugins: {
+            legend: { display: false },
+            datalabels: {
+              font: { weight: 'bold', size: 11 },
+              anchor: 'end',
+              align: 'end',
+              offset: 8,
+              color: '#f8fafc',
+              formatter: (value) => {
+                const percSub = tetoMO > 0 ? ((value / tetoMO) * 100).toFixed(2) : '0.00';
+                return `R$ ${formatarMoedaBR(value)} (${percSub}%)`;
+              }
+            }
+          },
+          scales: {
+            x: {
+              min: 0,
+              max: tetoMO > 0 ? tetoMO : undefined,
+              ticks: {
+                maxRotation: 0,
+                minRotation: 0,
+                color: '#94a3b8',
+                font: { size: 10 },
+                callback: (v) => 'R$ ' + formatarK(v)
+              },
+              grid: { color: '#1e293b' }
+            },
+            y: {
+              ticks: { color: '#f8fafc', font: { weight: 'bold', size: 11 } },
+              grid: { display: false }
             }
           }
-        },
-        scales: {
-          x: {
-            min: 0,
-            max: tetoMO > 0 ? tetoMO : undefined,
-            ticks: { 
-              maxRotation: 0, // Força os rótulos a ficarem retos (horizontais)
-              minRotation: 0,
-              color: '#94a3b8',
-              font: { size: 10 },
-              callback: (v) => 'R$ ' + formatarK(v)
-            },
-            grid: { color: '#1e293b' }
-          },
-          y: {
-            ticks: { color: '#f8fafc', font: { weight: 'bold', size: 11 } },
-            grid: { display: false }
-          }
         }
-      }
-    });
+      });
+    }
+  } catch (erroGraficoMO) {
+    console.error('⚠️ Erro ao renderizar gráfico de Mão de Obra:', erroGraficoMO);
   }
 
+  // A IA é chamada FORA do bloco do gráfico. Assim, mesmo que o gráfico
+  // tenha algum problema visual, todos os cards da Análise Avançada continuam.
   renderizarInsightsIA(analiseIA);
 }
 
@@ -1101,7 +1264,17 @@ function renderizarInsightsIA(listaAnalise) {
   const reqLancTotal = lancamentos.reduce((acc, item) => {
     const p = item.data.split('-');
     if (parseInt(p[1]) === (hoje.getMonth() + 1) && parseInt(p[0]) === hoje.getFullYear()) {
-      return acc + item.valor;
+      // MO é custo de mão de obra e NÃO entra no CMV de insumos.
+      if (ehDepartamentoMO(item.departamento)) return acc;
+      return acc + (parseFloat(item.valor) || 0);
+    }
+    return acc;
+  }, 0);
+
+  const totalMORelatorio = lancamentos.reduce((acc, item) => {
+    const p = item.data.split('-');
+    if (parseInt(p[1]) === (hoje.getMonth() + 1) && parseInt(p[0]) === hoje.getFullYear()) {
+      if (ehDepartamentoMO(item.departamento)) return acc + (parseFloat(item.valor) || 0);
     }
     return acc;
   }, 0);
@@ -1118,6 +1291,9 @@ function renderizarInsightsIA(listaAnalise) {
     const savingFormatado = savingPontosRS.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
     const corBadgeSaving = savingPontosRS >= 0 ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800';
 
+    const orcamentoMOIA = obterOrcamentoMaoDeObra(chaveMesAtual);
+    const totalMOIA = totalMORelatorio;
+
     const cardGlobal = document.createElement('div');
     cardGlobal.className = "p-2.5 rounded-lg bg-blue-50 border border-blue-200 text-xs text-blue-900 shadow-sm mb-2";
     cardGlobal.innerHTML = `
@@ -1132,6 +1308,7 @@ function renderizarInsightsIA(listaAnalise) {
         <div>• <strong>CMV Realizado:</strong> ${cmvRealPct.toFixed(1)}%</div>
         <div>• <strong>Meta Operacional:</strong> ${META_CMV_ALVO.toFixed(1)}%</div>
         <div>• <strong>Economia (Saving):</strong> <strong class="${savingPontosRS >= 0 ? 'text-emerald-700' : 'text-red-700'}">${savingFormatado}</strong></div>
+        <div>• <strong>MO (fora do CMV):</strong> R$ ${formatarMoedaBR(totalMOIA)} / Orçado R$ ${formatarMoedaBR(orcamentoMOIA)}</div>
       </div>
     `;
     container.appendChild(cardGlobal);
@@ -1260,11 +1437,28 @@ function gerarTextoRelatorioExecutivo() {
   const reqLancTotal = lancamentos.reduce((acc, item) => {
     const p = item.data.split('-');
     if (parseInt(p[1]) === (hoje.getMonth() + 1) && parseInt(p[0]) === hoje.getFullYear()) {
-      return acc + item.valor;
+      // Exclui MO do CMV do relatório executivo.
+      if (ehDepartamentoMO(item.departamento)) return acc;
+      return acc + (parseFloat(item.valor) || 0);
     }
     return acc;
   }, 0);
 
+  const lancamentosMO = {};
+  const totalMORelatorio = lancamentos.reduce((acc, item) => {
+    const p = item.data.split('-');
+    if (parseInt(p[1]) === (hoje.getMonth() + 1) && parseInt(p[0]) === hoje.getFullYear()) {
+      if (ehDepartamentoMO(item.departamento)) {
+        const valorMO = parseFloat(item.valor) || 0;
+        lancamentosMO[item.departamento] = (lancamentosMO[item.departamento] || 0) + valorMO;
+        return acc + valorMO;
+      }
+    }
+    return acc;
+  }, 0);
+
+  const chaveMesRelatorio = `${String(hoje.getMonth() + 1).padStart(2, '0')}-${hoje.getFullYear()}`;
+  const orcamentoMORelatorio = obterOrcamentoMaoDeObra(chaveMesRelatorio);
   const cmvRealPct = recRealTotal > 0 ? (reqLancTotal / recRealTotal) * 100 : 0;
   const META_CMV = 23.0;
   const saving = recRealTotal * ((META_CMV - cmvRealPct) / 100);
@@ -1276,9 +1470,24 @@ function gerarTextoRelatorioExecutivo() {
   texto += `📌 *PANORAMA GERAL*\n`;
   texto += `• *CMV Realizado:* ${cmvRealPct.toFixed(1)}%\n`;
   texto += `• *Saving Estimado:* R$ ${formatarMoedaBR(saving)}\n`;
-  texto += `• *Total Requisitado:* R$ ${formatarMoedaBR(reqLancTotal)}\n\n`;
+  texto += `• *Total de Insumos / CMV:* R$ ${formatarMoedaBR(reqLancTotal)}\n`;
+  texto += `• *Mão de Obra lançada (fora do CMV):* R$ ${formatarMoedaBR(totalMORelatorio)}\n`;
+  texto += `\n👷 *MÃO DE OBRA - CONTROLE SEPARADO*\n`;
+  texto += `• *Orçado Total para MO:* R$ ${formatarMoedaBR(orcamentoMORelatorio)}\n`;
+  texto += `• *Realizado / Lançado:* R$ ${formatarMoedaBR(totalMORelatorio)}\n`;
+  texto += `• *Saldo do Orçamento:* R$ ${formatarMoedaBR(orcamentoMORelatorio - totalMORelatorio)}\n`;
 
-  texto += `🚨 *ALERTAS DA IA & DEPARTAMENTOS*\n`;
+  const chavesMORelatorio = Object.keys(lancamentosMO);
+  if (chavesMORelatorio.length > 0) {
+    texto += `• *Detalhamento por MO:*\n`;
+    chavesMORelatorio.forEach(nomeMO => {
+      texto += `  - ${nomeMO}: R$ ${formatarMoedaBR(lancamentosMO[nomeMO])}\n`;
+    });
+  } else {
+    texto += `• *Detalhamento por MO:* Nenhum lançamento no período.\n`;
+  }
+
+  texto += `\n🚨 *ALERTAS DA IA & DEPARTAMENTOS*\n`;
 
   const container = document.getElementById('container-ia-insights') || document.getElementById('containerInsightsIA');
   if (container) {
