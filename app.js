@@ -4,6 +4,26 @@ let receitasOrcadas = JSON.parse(localStorage.getItem('requisicoes_receitas_orca
 let receitasRealizadas = JSON.parse(localStorage.getItem('requisicoes_receitas_realizadas')) || {};
 let despesasOrcadas = JSON.parse(localStorage.getItem('requisicoes_despesas_orcadas')) || {};
 
+let chartDeptos = null;
+let chartMaoDeObra = null;
+
+// Função para limpar caracteres proibidos nas chaves do Firebase
+function sanitizarParaFirebase(obj) {
+  if (Array.isArray(obj)) {
+    return obj.map(sanitizarParaFirebase);
+  } else if (obj !== null && typeof obj === 'object') {
+    const novoObj = {};
+    for (const key in obj) {
+      if (Object.prototype.hasOwnProperty.call(obj, key)) {
+        const chaveLimpa = key.replace(/[\.\#\$\/\[\]]/g, '_');
+        novoObj[chaveLimpa] = sanitizarParaFirebase(obj[key]);
+      }
+    }
+    return novoObj;
+  }
+  return obj;
+}
+
 // BUSCA AUTOMÁTICA DA NUVEM (FIREBASE)
 if (typeof firebase !== 'undefined' && firebase.database) {
   firebase.database().ref('dados_dashboard').on('value', (snapshot) => {
@@ -14,13 +34,11 @@ if (typeof firebase !== 'undefined' && firebase.database) {
       if (dados.receitasRealizadas) receitasRealizadas = dados.receitasRealizadas;
       if (dados.despesasOrcadas) despesasOrcadas = dados.despesasOrcadas;
 
-      // Atualiza o backup no localStorage
       localStorage.setItem('requisicoes_dados', JSON.stringify(lancamentos));
       localStorage.setItem('requisicoes_receitas_orcadas', JSON.stringify(receitasOrcadas));
       localStorage.setItem('requisicoes_receitas_realizadas', JSON.stringify(receitasRealizadas));
       localStorage.setItem('requisicoes_despesas_orcadas', JSON.stringify(despesasOrcadas));
 
-      // Atualiza a tela automaticamente para todos os usuários
       if (typeof atualizarDashboard === 'function') atualizarDashboard();
       if (typeof renderizarHistorico === 'function') renderizarHistorico();
       if (typeof filtrarLancamentos === 'function') filtrarLancamentos();
@@ -30,20 +48,22 @@ if (typeof firebase !== 'undefined' && firebase.database) {
   });
 }
 
-// Função auxiliar para enviar alterações para a nuvem
 function sincronizarComFirebase() {
   if (typeof firebase !== 'undefined' && firebase.database) {
-    firebase.database().ref('dados_dashboard').set({
+    const dadosParaSalvar = {
       lancamentos: typeof lancamentos !== 'undefined' ? lancamentos : [],
       receitasOrcadas: typeof receitasOrcadas !== 'undefined' ? receitasOrcadas : {},
       receitasRealizadas: typeof receitasRealizadas !== 'undefined' ? receitasRealizadas : {},
       despesasOrcadas: typeof despesasOrcadas !== 'undefined' ? despesasOrcadas : {}
-    }).then(() => {
+    };
+
+    firebase.database().ref('dados_dashboard').set(sanitizarParaFirebase(dadosParaSalvar)).then(() => {
       console.log("✅ Dados salvos no Firebase!");
     }).catch(err => console.error("❌ Erro ao salvar no Firebase:", err));
   }
 }
 
+// Mapeamento de setores
 const mapeamentoDeptos = {
   "2401": "Restaurante Vezzoso Cucina",
   "2407": "Restaurante Kibô Japanese",
@@ -59,12 +79,20 @@ const mapeamentoDeptos = {
   "2496": "Room Service",
   "2499": "Banquetes",
   "2400": "Cozinha Central",
-  "0000": "Refeitorio"
+  "0000": "Refeitorio",
+  "9999": "Mão de Obra (Serviços de Terceiros)"
 };
 
-const departamentosLista = Object.values(mapeamentoDeptos);
+const departamentosLista = [
+  ...Object.values(mapeamentoDeptos),
+  "MO extra Steward manha",
+  "MO extra Steward tarde",
+  "MO extra Steward madrugada",
+  "MO extra manha",
+  "MO extra tarde",
+  "MO extra madrugada"
+];
 const diasNomes = ['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado'];
-let chartDeptos = null;
 
 if (typeof ChartDataLabels !== 'undefined') {
   Chart.register(ChartDataLabels);
@@ -87,10 +115,40 @@ function atualizarTotaisTopo() {
   let totalDespOrcada = 0;
   let totalDespRealizada = 0;
 
-  document.querySelectorAll('.input-rec-orcada').forEach(i => totalRecOrcada += converterTextoParaNumero(i.value));
-  document.querySelectorAll('.input-rec-realizada').forEach(i => totalRecRealizada += converterTextoParaNumero(i.value));
-  document.querySelectorAll('.input-desp-orcada').forEach(i => totalDespOrcada += converterTextoParaNumero(i.value));
-  document.querySelectorAll('.input-desp-realizada').forEach(i => totalDespRealizada += converterTextoParaNumero(i.value));
+  document.querySelectorAll('.input-rec-orcada').forEach(i => {
+    totalRecOrcada += converterTextoParaNumero(i.value);
+  });
+
+  document.querySelectorAll('.input-rec-realizada').forEach(i => {
+    totalRecRealizada += converterTextoParaNumero(i.value);
+  });
+
+  document.querySelectorAll('.input-desp-orcada').forEach(i => {
+    const depto = i.getAttribute('data-depto') || '';
+    const deptoLower = depto.toLowerCase();
+    const ehMO = depto === "Mão de Obra (Serviços de Terceiros)" || 
+                 deptoLower.startsWith('mo extra') || 
+                 deptoLower.includes('mão de obra') || 
+                 deptoLower.includes('mao de obra');
+
+    if (!ehMO) {
+      totalDespOrcada += converterTextoParaNumero(i.value);
+    }
+  });
+
+  document.querySelectorAll('.input-desp-realizada').forEach(i => {
+    const depto = i.getAttribute('data-depto') || '';
+    const deptoLower = depto.toLowerCase();
+
+    const ehMO = depto === "Mão de Obra (Serviços de Terceiros)" || 
+                 deptoLower.startsWith('mo extra') || 
+                 deptoLower.includes('mão de obra') || 
+                 deptoLower.includes('mao de obra');
+
+    if (!ehMO) {
+      totalDespRealizada += converterTextoParaNumero(i.value);
+    }
+  });
 
   const elRecOrc = document.getElementById('rec-orcada-total');
   const elRecReal = document.getElementById('rec-realizada-total');
@@ -101,6 +159,17 @@ function atualizarTotaisTopo() {
   if (elRecReal) elRecReal.value = "R$ " + formatarMoedaBR(totalRecRealizada);
   if (elDespOrc) elDespOrc.value = "R$ " + formatarMoedaBR(totalDespOrcada);
   if (elDespReal) elDespReal.value = "R$ " + formatarMoedaBR(totalDespRealizada);
+
+  // Recalcula o % CMV exclusivo de insumos sobre a receita realizada
+  const elCMVReal = document.getElementById('cmv-realizado-total') || document.getElementById('dash-card-percentual');
+  if (elCMVReal) {
+    const percCMV = totalRecRealizada > 0 ? (totalDespRealizada / totalRecRealizada) * 100 : 0;
+    if (elCMVReal.tagName === 'INPUT') {
+      elCMVReal.value = percCMV.toFixed(1) + "%";
+    } else {
+      elCMVReal.textContent = percCMV.toFixed(1) + "%";
+    }
+  }
 }
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -248,7 +317,7 @@ function renderizarFormBudgets() {
 
       <!-- 4. Requisições Lançadas & Saldo -->
       <div class="md:col-span-3 grid grid-cols-2 gap-1 items-center">
-        <input type="text" value="${formatarMoedaBR(valDespRealizada)}" readonly
+        <input type="text" data-depto="${depto}" value="${formatarMoedaBR(valDespRealizada)}" readonly
                class="input-desp-realizada w-full pl-2 pr-1 py-1 border border-amber-300 bg-amber-50/50 rounded font-extrabold text-amber-900">
         <div class="text-center ${corBadge} p-1 rounded font-bold text-[11px] truncate">
           R$ ${formatarMoedaBR(saldo)} (${percConsumido}%)
@@ -266,9 +335,9 @@ function salvarBudgets(e) {
   const mesAnoInput = document.getElementById('budget-mes-ano').value;
   const chaveMes = obterChaveMes(mesAnoInput);
 
-  if (!receitasOrcadas[chaveMes]) receitasOrcadas[chaveMes] = {};
-  if (!receitasRealizadas[chaveMes]) receitasRealizadas[chaveMes] = {};
-  if (!despesasOrcadas[chaveMes]) despesasOrcadas[chaveMes] = {};
+  receitasOrcadas[chaveMes] = {};
+  receitasRealizadas[chaveMes] = {};
+  despesasOrcadas[chaveMes] = {};
 
   const inputsRecOrc = document.querySelectorAll('.input-rec-orcada');
   const inputsRecReal = document.querySelectorAll('.input-rec-realizada');
@@ -319,12 +388,36 @@ function importarRelatorioDRE(evento) {
       };
 
       let contaAtual = null;
+      let totalMaoDeObraOrcado = 0;
 
       rows.forEach((row) => {
         if (!row || row.length < 1) return;
 
         const deptoTexto = row[0] ? String(row[0]).trim() : '';
         const deptoLower = deptoTexto.toLowerCase();
+        const contaLimpa = deptoTexto.replace(/\s+/g, '');
+
+        // CAPTURA DA MÃO DE OBRA PELO MAIOR VALOR (Evita pegar sublinhas pequenas ou somar duplicado)
+        if (
+          contaLimpa.startsWith('3.12.205') || 
+          deptoLower.includes('serviços de terceiros') || 
+          deptoLower.includes('servicos de terceiros')
+        ) {
+          const valOrcado = converterParaNumero(row[2]);
+          if (valOrcado > totalMaoDeObraOrcado) {
+            totalMaoDeObraOrcado = valOrcado;
+          }
+          return;
+        }
+
+        // Se a DRE não usar a linha sintética 3.12.205, acumula APENAS as contas analíticas de Terceiros (3.12.102.003)
+        if (totalMaoDeObraOrcado === 0 && deptoTexto.includes('3.12.102.003')) {
+          const valOrcado = converterParaNumero(row[2]);
+          if (valOrcado > 0) {
+            totalMaoDeObraOrcado += valOrcado;
+          }
+          return;
+        }
 
         if (
           deptoTexto.includes('3.11.102.001') || 
@@ -339,7 +432,6 @@ function importarRelatorioDRE(evento) {
 
         if (
           deptoTexto.includes('3.12.102.001') || 
-          deptoTexto.includes('3.12.102.003') || 
           (deptoLower.includes('custo') && deptoLower.includes('alimento'))
         ) {
           contaAtual = 'DESPESA_ALIMENTOS';
@@ -350,8 +442,7 @@ function importarRelatorioDRE(evento) {
           deptoTexto.includes('3.11.102.002') || 
           deptoTexto.includes('3.11.102.005') || 
           deptoTexto.includes('3.12.102.002') || 
-          deptoLower.includes('bebida') || 
-          deptoLower.includes('percentuais')
+          deptoLower.includes('bebida')
         ) {
           contaAtual = null;
           return;
@@ -378,6 +469,9 @@ function importarRelatorioDRE(evento) {
         }
       });
 
+      // Atribui o valor correto e não duplicado à Mão de Obra
+      despesasOrcadas[chaveMes]["Mão de Obra (Serviços de Terceiros)"] = totalMaoDeObraOrcado;
+
       localStorage.setItem('requisicoes_receitas_orcadas', JSON.stringify(receitasOrcadas));
       localStorage.setItem('requisicoes_receitas_realizadas', JSON.stringify(receitasRealizadas));
       localStorage.setItem('requisicoes_despesas_orcadas', JSON.stringify(despesasOrcadas));
@@ -385,7 +479,7 @@ function importarRelatorioDRE(evento) {
       sincronizarComFirebase();
 
       renderizarFormBudgets();
-      alert(`✅ DRE Importada com Sucesso para ${chaveMes}!\nTodas as receitas e custos de alimentos foram consolidados.`);
+      alert(`✅ DRE Importada com Sucesso para ${chaveMes}! Mão de Obra ajustada para: R$ ${formatarMoedaBR(totalMaoDeObraOrcado)}`);
 
     } catch (err) {
       console.error(err);
@@ -406,7 +500,7 @@ if (formReq) {
     const valorVal = parseFloat(document.getElementById('valor').value);
 
     const chaveMes = obterChaveMes(dataVal);
-    const tetoDesp = (despesasOrcadas[chaveMes] && despesasOrcadas[chaveMes][deptoVal]) ? despesasOrcadas[chaveMes][deptoVal] : 0;
+    const tetoDesp = (despesasOrcadas[chaveMes] && despesasOrcadas[chaveMes][deptoVal]) || 0;
 
     if (tetoDesp > 0) {
       const partesNovaData = dataVal.split('-');
@@ -546,7 +640,6 @@ function renderizarTabela(dadosExibicao) {
     return;
   }
 
-  // Ordena por data mais recente
   dadosExibicao.sort((a, b) => new Date(b.data) - new Date(a.data));
 
   dadosExibicao.forEach((item) => {
@@ -642,11 +735,22 @@ function atualizarGraficos() {
   });
 
   const totaisPorDepto = {};
-  let totalGeral = 0;
+  let totalGeralInsumos = 0; // Somente Insumos/Mercadorias
 
   dadosDash.forEach(item => {
-    totalGeral += item.valor;
+    const deptoLower = item.departamento.toLowerCase();
+    const ehMO = item.departamento === "Mão de Obra (Serviços de Terceiros)" || 
+                 deptoLower.startsWith('mo extra') || 
+                 deptoLower.includes('mão de obra') || 
+                 deptoLower.includes('mao de obra');
+
+    // Mapeia para os gráficos/totais por setor
     totaisPorDepto[item.departamento] = (totaisPorDepto[item.departamento] || 0) + item.valor;
+
+    // Acumula no Total Geral APENAS se NÃO for Mão de Obra
+    if (!ehMO) {
+      totalGeralInsumos += item.valor;
+    }
   });
 
   const hoje = new Date();
@@ -655,20 +759,20 @@ function atualizarGraficos() {
   const despOrcDoMes = despesasOrcadas[chaveMesAtual] || {};
 
   let receitaRealizadaHotel = 0;
-  let despesaOrcadaHotel = 0;
 
   departamentosLista.forEach(d => {
-    receitaRealizadaHotel += (recRealDoMes[d] || 0);
-    despesaOrcadaHotel += (despOrcDoMes[d] || 0);
+    receitaRealizadaHotel += recRealDoMes[d] || 0;
   });
 
+  // Atualiza o Card de Custo Total excluindo MO
   const elTotal = document.getElementById('dash-card-total');
-  if (elTotal) elTotal.innerText = "R$ " + formatarMoedaBR(totalGeral);
+  if (elTotal) elTotal.innerText = "R$ " + formatarMoedaBR(totalGeralInsumos);
   
+  // Atualiza % CMV
   const elPerc = document.getElementById('dash-card-percentual');
   if (elPerc) {
     if (receitaRealizadaHotel > 0) {
-      const cmvReal = ((totalGeral / receitaRealizadaHotel) * 100).toFixed(1);
+      const cmvReal = ((totalGeralInsumos / receitaRealizadaHotel) * 100).toFixed(1);
       elPerc.innerText = `${cmvReal}%`;
       elPerc.className = `text-xl font-extrabold mt-0.5 ${cmvReal > 29.0 ? 'text-red-400' : 'text-emerald-400'}`;
     } else {
@@ -677,10 +781,17 @@ function atualizarGraficos() {
     }
   }
 
+  // Maior Setor (ignorando Mão de Obra)
   let topDepto = '-';
   let maiorValor = 0;
   for (let depto in totaisPorDepto) {
-    if (totaisPorDepto[depto] > maiorValor) {
+    const dLower = depto.toLowerCase();
+    const ehMO = depto === "Mão de Obra (Serviços de Terceiros)" || 
+                 dLower.startsWith('mo extra') || 
+                 dLower.includes('mão de obra') || 
+                 dLower.includes('mao de obra');
+
+    if (!ehMO && totaisPorDepto[depto] > maiorValor) {
       maiorValor = totaisPorDepto[depto];
       topDepto = depto;
     }
@@ -694,11 +805,18 @@ function atualizarGraficos() {
   const valoresGastos = [];
   const valoresTetos = [];
   const coresGastos = [];
-  const cmvDeptos = []; // Armazena o CMV individual do departamento
+  const cmvDeptos = [];
 
   const analiseIA = [];
 
   departamentosLista.forEach(depto => {
+    const deptoLower = depto.toLowerCase();
+    if (
+      deptoLower.includes('mão de obra') || 
+      deptoLower.includes('mao de obra') || 
+      deptoLower.startsWith('mo extra')
+    ) return;
+
     const gasto = totaisPorDepto[depto] || 0;
     const despOrc = despOrcDoMes[depto] || 0;
     const recReal = recRealDoMes[depto] || 0;
@@ -743,6 +861,7 @@ function atualizarGraficos() {
     }
   });
 
+  // Renderiza Gráfico Principal de Insumos
   const canvas = document.getElementById('chartDeptos');
   if (canvas) {
     if (chartDeptos) chartDeptos.destroy();
@@ -835,24 +954,145 @@ function atualizarGraficos() {
     });
   }
 
+  // Renderiza Gráfico Dedicado de Mão de Obra (3.12.205) com Totalizador Claro
+  const canvasMO = document.getElementById('chartMaoDeObra');
+  if (canvasMO) {
+    const deptoMO = "Mão de Obra (Serviços de Terceiros)";
+    const tetoMO = despOrcDoMes[deptoMO] || 0;
+
+    const labelsMO = [];
+    const valoresMO = [];
+    let gastoMOTotal = 0;
+
+    departamentosLista.forEach(key => {
+      const keyLower = key.toLowerCase();
+      if (keyLower.startsWith('mo extra') || key === deptoMO) {
+        const valorSub = totaisPorDepto[key] || 0;
+        if (valorSub > 0 && key !== deptoMO) {
+          labelsMO.push(key);
+          valoresMO.push(valorSub);
+        }
+        if (key !== deptoMO) {
+          gastoMOTotal += valorSub;
+        }
+      }
+    });
+
+    if (labelsMO.length === 0) {
+      labelsMO.push(deptoMO);
+      valoresMO.push(0);
+    }
+
+    // Atualiza o título/subtítulo do card para mostrar claramente o Consumo Total vs Teto
+    const percConsumidoTotal = tetoMO > 0 ? ((gastoMOTotal / tetoMO) * 100).toFixed(1) : '0.0';
+    const saldoResta = tetoMO - gastoMOTotal;
+
+    // Tenta localizar o título do card para injetar o resumo financeiro
+    const containerParent = canvasMO.closest('.card, .bg-slate-800, div');
+    if (containerParent) {
+      let subHeader = containerParent.querySelector('.mo-total-summary');
+      if (!subHeader) {
+        subHeader = document.createElement('div');
+        subHeader.className = 'mo-total-summary';
+        subHeader.style.cssText = 'font-size: 13px; font-weight: bold; margin-bottom: 12px; color: #cbd5e1;';
+        canvasMO.parentNode.insertBefore(subHeader, canvasMO);
+      }
+      
+      const corStatus = gastoMOTotal > tetoMO ? '#ef4444' : '#10b981';
+      subHeader.innerHTML = `
+        Consumo Total: <span style="color: ${corStatus}">R$ ${formatarMoedaBR(gastoMOTotal)} (${percConsumidoTotal}%)</span> 
+        | Teto Orçado: <b>R$ ${formatarMoedaBR(tetoMO)}</b> 
+        | Saldo: <span style="color: ${saldoResta < 0 ? '#ef4444' : '#10b981'}">R$ ${formatarMoedaBR(saldoResta)}</span>
+      `;
+    }
+
+    // Ajusta altura do canvas
+    const containerMO = canvasMO.parentElement;
+    if (containerMO) {
+      containerMO.style.height = `${Math.max(140, labelsMO.length * 40)}px`;
+    }
+
+    // Correção do eixo X (R$ Duplicado no eixo)
+    if (chartMaoDeObra) chartMaoDeObra.destroy();
+    chartMaoDeObra = new Chart(canvasMO, {
+      type: 'bar',
+      data: {
+        labels: labelsMO,
+        datasets: [
+          {
+            label: 'Valor Lançado',
+            data: valoresMO,
+            backgroundColor: '#f59e0b',
+            borderRadius: 4,
+            barThickness: 16
+          }
+        ]
+      },
+      options: {
+        indexAxis: 'y',
+        responsive: true,
+        maintainAspectRatio: false,
+        layout: { padding: { right: 260 } },
+        plugins: {
+          legend: { display: false },
+          datalabels: {
+            font: { weight: 'bold', size: 11 },
+            anchor: 'end',
+            align: 'end',
+            offset: 8,
+            color: '#f8fafc',
+            formatter: (value) => {
+              const percSub = tetoMO > 0 ? ((value / tetoMO) * 100).toFixed(2) : '0.00';
+              return `R$ ${formatarMoedaBR(value)} (${percSub}%)`;
+            }
+          }
+        },
+        scales: {
+          x: {
+            min: 0,
+            max: tetoMO > 0 ? tetoMO : undefined,
+            ticks: { 
+              maxRotation: 0, // Força os rótulos a ficarem retos (horizontais)
+              minRotation: 0,
+              color: '#94a3b8',
+              font: { size: 10 },
+              callback: (v) => 'R$ ' + formatarK(v)
+            },
+            grid: { color: '#1e293b' }
+          },
+          y: {
+            ticks: { color: '#f8fafc', font: { weight: 'bold', size: 11 } },
+            grid: { display: false }
+          }
+        }
+      }
+    });
+  }
+
   renderizarInsightsIA(analiseIA);
 }
 
-// ==========================================
-// FUNÇÃO DE INSIGHTS E INTELIGÊNCIA ARTIFICIAL
-// ==========================================
 function renderizarInsightsIA(listaAnalise) {
-  const container = document.getElementById('container-ia-insights') || document.getElementById('containerInsightsIA') || document.querySelector('.space-y-3');
+  const container = document.getElementById('container-ia-insights') || document.getElementById('containerInsightsIA');
   if (!container) return;
 
   container.innerHTML = '';
 
+  const inputMes = document.getElementById('budget-mes-ano')?.value;
   const hoje = new Date();
-  const chaveMesAtual = `${String(hoje.getMonth() + 1).padStart(2, '0')}-${hoje.getFullYear()}`;
-  
-  // Variáveis de tempo para cálculo do Run-Rate
-  const diaAtual = hoje.getDate();
-  const diasNoMes = new Date(hoje.getFullYear(), hoje.getMonth() + 1, 0).getDate();
+  const chaveMesAtual = inputMes ? obterChaveMes(inputMes) : `${String(hoje.getMonth() + 1).padStart(2, '0')}-${hoje.getFullYear()}`;
+
+  let dataReferencia = new Date();
+  if (inputMes) {
+    const [ano, mes] = inputMes.split('-').map(Number);
+    if (ano === dataReferencia.getFullYear() && (mes - 1) === dataReferencia.getMonth()) {
+    } else {
+      dataReferencia = new Date(ano, mes, 0);
+    }
+  }
+
+  const diaAtual = dataReferencia.getDate();
+  const diasNoMes = new Date(dataReferencia.getFullYear(), dataReferencia.getMonth() + 1, 0).getDate();  
   
   const recOrcTotal = Object.values(receitasOrcadas[chaveMesAtual] || {}).reduce((a, b) => a + b, 0);
   const recRealTotal = Object.values(receitasRealizadas[chaveMesAtual] || {}).reduce((a, b) => a + b, 0);
@@ -868,7 +1108,6 @@ function renderizarInsightsIA(listaAnalise) {
 
   const META_CMV_ALVO = 23.0;
 
-  // 0. PANORAMA GLOBAL
   if (recOrcTotal > 0 || despOrcTotal > 0) {
     const pctReceita = recOrcTotal > 0 ? ((recRealTotal / recOrcTotal) * 100).toFixed(1) : '0.0';
     const cmvRealPct = recRealTotal > 0 ? (reqLancTotal / recRealTotal) * 100 : 0;
@@ -888,7 +1127,7 @@ function renderizarInsightsIA(listaAnalise) {
           💰 Saving: ${savingFormatado} (${pontosEconomizados.toFixed(1)} p.p. de folga)
         </span>
       </div>
-      <div class="grid grid-cols-1 md:grid-cols-4 gap-1.5 mt-1 font-medium text-[11px]">
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-1.5 mt-1 font-medium text-[11px]">
         <div>• <strong>Meta Receita:</strong> ${pctReceita}% real.</div>
         <div>• <strong>CMV Realizado:</strong> ${cmvRealPct.toFixed(1)}%</div>
         <div>• <strong>Meta Operacional:</strong> ${META_CMV_ALVO.toFixed(1)}%</div>
@@ -898,7 +1137,6 @@ function renderizarInsightsIA(listaAnalise) {
     container.appendChild(cardGlobal);
   }
 
-  // Prepara projeção de ritmo
   listaAnalise.forEach(item => {
     item.mediaDiaria = item.gasto / (diaAtual || 1);
     item.projecaoFimMes = item.mediaDiaria * diasNoMes;
@@ -907,8 +1145,6 @@ function renderizarInsightsIA(listaAnalise) {
 
   const folga = listaAnalise.filter(i => i.restante > 0).sort((a, b) => b.restante - a.restante);
 
-  // 🚨 NÍVEL 1 (CRÍTICO): Estouro de teto ou gasto sem orçamento
-  // A) Sem Orçamento Previsto
   listaAnalise.filter(i => i.despOrc === 0 && i.gasto > 0).forEach(item => {
     const doador = folga.find(b => b.restante >= item.gasto && b.depto !== item.depto);
     const card = document.createElement('div');
@@ -930,7 +1166,6 @@ function renderizarInsightsIA(listaAnalise) {
     container.appendChild(card);
   });
 
-  // B) Excedeu o Orçado
   listaAnalise.filter(i => i.despOrc > 0 && i.gasto > i.despOrc).forEach(item => {
     const excesso = item.gasto - item.despOrc;
     const doador = folga.find(b => b.restante >= excesso && b.depto !== item.depto);
@@ -955,7 +1190,6 @@ function renderizarInsightsIA(listaAnalise) {
     container.appendChild(card);
   });
 
-  // ⚠️ NÍVEL 2 (AVISO): Consumo entre 80% e 99.9% do teto
   listaAnalise.filter(i => {
     const perc = i.despOrc > 0 ? (i.gasto / i.despOrc) * 100 : 0;
     return perc >= 80 && perc <= 99.9;
@@ -975,7 +1209,6 @@ function renderizarInsightsIA(listaAnalise) {
     container.appendChild(card);
   });
 
-  // 📈 NÍVEL 3 (TENDÊNCIA): Ritmo de gasto (Run-Rate)
   listaAnalise.filter(i => 
     i.restante >= 0 && 
     i.despOrc > 0 && 
@@ -996,7 +1229,6 @@ function renderizarInsightsIA(listaAnalise) {
     container.appendChild(card);
   });
 
-  // 🎯 NÍVEL 4 (ELOGIO / SAVING): Oportunidade de Margem
   listaAnalise.filter(i => 
     i.recReal > 1000 && 
     i.gasto > 0 && 
@@ -1018,16 +1250,11 @@ function renderizarInsightsIA(listaAnalise) {
   });
 }
 
-// ==========================================
-// EXPORTAÇÃO DE RELATÓRIO (WHATSAPP & PDF)
-// ==========================================
-
 function gerarTextoRelatorioExecutivo() {
   const hoje = new Date();
   const dataHojeStr = hoje.toLocaleDateString('pt-BR');
   const chaveMesAtual = `${String(hoje.getMonth() + 1).padStart(2, '0')}-${hoje.getFullYear()}`;
 
-  const recOrcTotal = Object.values(receitasOrcadas[chaveMesAtual] || {}).reduce((a, b) => a + b, 0);
   const recRealTotal = Object.values(receitasRealizadas[chaveMesAtual] || {}).reduce((a, b) => a + b, 0);
   
   const reqLancTotal = lancamentos.reduce((acc, item) => {
@@ -1047,13 +1274,12 @@ function gerarTextoRelatorioExecutivo() {
   texto += `-----------------------------------\n\n`;
   
   texto += `📌 *PANORAMA GERAL*\n`;
-  texto += `• *CMV Realizado:* ${cmvRealPct.toFixed(1)}% (Meta: ${META_CMV.toFixed(1)}%)\n`;
+  texto += `• *CMV Realizado:* ${cmvRealPct.toFixed(1)}%\n`;
   texto += `• *Saving Estimado:* R$ ${formatarMoedaBR(saving)}\n`;
   texto += `• *Total Requisitado:* R$ ${formatarMoedaBR(reqLancTotal)}\n\n`;
 
   texto += `🚨 *ALERTAS DA IA & DEPARTAMENTOS*\n`;
 
-  // Captura cada card da IA separando titulo de detalhes
   const container = document.getElementById('container-ia-insights') || document.getElementById('containerInsightsIA');
   if (container) {
     const cards = container.children;
@@ -1078,14 +1304,12 @@ function gerarTextoRelatorioExecutivo() {
   return texto;
 }
 
-// 📱 EXPORTAR PARA WHATSAPP
 function exportarRelatorioWhatsApp() {
   const texto = gerarTextoRelatorioExecutivo();
   const url = `https://api.whatsapp.com/send?text=${encodeURIComponent(texto)}`;
   window.open(url, '_blank');
 }
 
-// 📄 EXPORTAR PARA PDF (VERSÃO FINAL 100% LIMPA)
 function exportarRelatorioPDF() {
   const { jsPDF } = window.jspdf;
   if (!jsPDF) {
