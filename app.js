@@ -160,7 +160,7 @@ function atualizarTotaisTopo() {
   if (elDespOrc) elDespOrc.value = "R$ " + formatarMoedaBR(totalDespOrcada);
   if (elDespReal) elDespReal.value = "R$ " + formatarMoedaBR(totalDespRealizada);
 
-  // Recalcula o % CMV exclusivo de insumos sobre a receita realizada
+  // Recalcula o % de requisições de insumos sobre a Receita Realizada (limite 29%)
   const elCMVReal = document.getElementById('cmv-realizado-total') || document.getElementById('dash-card-percentual');
   if (elCMVReal) {
     const percCMV = totalRecRealizada > 0 ? (totalDespRealizada / totalRecRealizada) * 100 : 0;
@@ -288,9 +288,17 @@ function renderizarFormBudgets() {
     const valDespOrcada = despOrcDoMes[depto] || 0;
     const valDespRealizada = custosAcumuladosPorDepto[depto] || 0;
 
-    const saldo = valDespOrcada - valDespRealizada;
-    const percConsumido = valDespOrcada > 0 ? ((valDespRealizada / valDespOrcada) * 100).toFixed(1) : '0.0';
-    const corBadge = saldo < 0 ? 'bg-red-100 text-red-700' : 'bg-emerald-100 text-emerald-800';
+    // Regra financeira: requisições são comparadas somente com a Receita Realizada.
+    // A Receita/Despesa Orçada continua sendo informativa e não define o limite de gasto.
+    const tetoOperacional29 = valRecRealizada * 0.29;
+    const saldo = tetoOperacional29 - valDespRealizada;
+    const percConsumido = valRecRealizada > 0 ? ((valDespRealizada / valRecRealizada) * 100).toFixed(1) : '0.0';
+    const percNumerico = parseFloat(percConsumido) || 0;
+    const corBadge = percNumerico >= 29
+      ? 'bg-red-100 text-red-700'
+      : percNumerico >= 26.5
+        ? 'bg-amber-100 text-amber-800'
+        : 'bg-emerald-100 text-emerald-800';
 
     const div = document.createElement('div');
     div.className = "bg-gray-50 p-2 rounded-lg border border-gray-200 grid grid-cols-1 md:grid-cols-12 gap-2 items-center text-xs";
@@ -500,9 +508,10 @@ if (formReq) {
     const valorVal = parseFloat(document.getElementById('valor').value);
 
     const chaveMes = obterChaveMes(dataVal);
-    const tetoDesp = (despesasOrcadas[chaveMes] && despesasOrcadas[chaveMes][deptoVal]) || 0;
+    const receitaRealizadaDepto = (receitasRealizadas[chaveMes] && receitasRealizadas[chaveMes][deptoVal]) || 0;
+    const tetoReceitaRealizada = receitaRealizadaDepto * 0.29;
 
-    if (tetoDesp > 0) {
+    if (tetoReceitaRealizada > 0) {
       const partesNovaData = dataVal.split('-');
       const mesNovo = parseInt(partesNovaData[1]) - 1;
       const anoNovo = parseInt(partesNovaData[0]);
@@ -518,10 +527,14 @@ if (formReq) {
         return acc;
       }, 0);
 
-      if (totalMesAtual + valorVal > tetoDesp) {
-        const excesso = (totalMesAtual + valorVal) - tetoDesp;
-        alert(`⚠️ ATENÇÃO: Este lançamento excede o Teto de Despesa do setor (${deptoVal}) em R$ ${formatarMoedaBR(excesso)}!\nO lançamento será gravado para fins de registro.`);
+      if (totalMesAtual + valorVal > tetoReceitaRealizada) {
+        const excesso = (totalMesAtual + valorVal) - tetoReceitaRealizada;
+        alert(`⚠️ ATENÇÃO: Este lançamento faz as requisições do setor (${deptoVal}) ultrapassarem o limite de 29% da Receita Realizada em R$ ${formatarMoedaBR(excesso)}!\nO lançamento será gravado para fins de registro.`);
+      } else if (totalMesAtual + valorVal >= receitaRealizadaDepto * 0.265) {
+        alert(`🟡 ATENÇÃO: Este lançamento coloca as requisições de ${deptoVal} na faixa de alerta (26,5% a 28,9% da Receita Realizada).`);
       }
+    } else if (valorVal > 0) {
+      alert(`⚠️ ATENÇÃO: O setor (${deptoVal}) ainda não possui Receita Realizada registrada para este mês. A requisição será gravada para fins de registro.`);
     }
 
     const partes = dataVal.split('-');
@@ -853,27 +866,26 @@ function atualizarGraficos() {
     const despOrc = despOrcDoMes[depto] || 0;
     const recReal = recRealDoMes[depto] || 0;
 
-    if (gasto > 0 || despOrc > 0) {
+    if (gasto > 0 || recReal > 0) {
       labelsDeptos.push(depto);
       valoresGastos.push(gasto);
-      valoresTetos.push(despOrc);
+
+      // Teto operacional: 29% da Receita Realizada.
+      const tetoReceita = recReal * 0.29;
+      valoresTetos.push(tetoReceita);
 
       const cmvLocal = recReal > 0 ? ((gasto / recReal) * 100) : 0;
       cmvDeptos.push(cmvLocal);
 
-      let percConsumidoDesp = 0;
-      if (despOrc > 0) {
-        percConsumidoDesp = (gasto / despOrc) * 100;
-      } else if (gasto > 0) {
-        percConsumidoDesp = 100;
-      }
-      
+      const percConsumidoDesp = cmvLocal;
       percentuaisReais.push(percConsumidoDesp);
-      percentuaisExibicaoBarra.push(Math.min(100, parseFloat(percConsumidoDesp.toFixed(1))));
+      percentuaisExibicaoBarra.push(Math.min(35, parseFloat(percConsumidoDesp.toFixed(1))));
 
-      if (despOrc > 0 && gasto > despOrc) {
+      if (recReal <= 0 && gasto > 0) {
         coresGastos.push('#ef4444');
-      } else if (despOrc > 0 && percConsumidoDesp >= 80.0) {
+      } else if (percConsumidoDesp >= 29.0) {
+        coresGastos.push('#ef4444');
+      } else if (percConsumidoDesp >= 26.5) {
         coresGastos.push('#f59e0b');
       } else {
         coresGastos.push('#10b981');
@@ -886,8 +898,9 @@ function atualizarGraficos() {
         despOrc,
         recReal,
         cmvLocal,
-        saldo: despOrc - gasto,
-        restante: despOrc - gasto,
+        limite29: tetoReceita,
+        saldo: tetoReceita - gasto,
+        restante: tetoReceita - gasto,
         percConsumidoDesp
       });
     }
@@ -896,6 +909,12 @@ function atualizarGraficos() {
   // Renderiza Gráfico Principal de Insumos
   const canvas = document.getElementById('chartDeptos');
   if (canvas) {
+    // 1. AJUSTE AQUI: Reduz a altura da div de acordo com o número de setores exibidos
+    if (canvas.parentElement) {
+      const alturaCalculada = Math.max(180, labelsDeptos.length * 42);
+      canvas.parentElement.style.height = `${alturaCalculada}px`;
+    }
+
     if (chartDeptos) chartDeptos.destroy();
     chartDeptos = new Chart(canvas, {
       type: 'bar',
@@ -903,7 +922,7 @@ function atualizarGraficos() {
         labels: labelsDeptos,
         datasets: [
           {
-            label: '% Consumido do Orçamento',
+            label: '% da Receita Realizada',
             data: percentuaisExibicaoBarra,
             backgroundColor: coresGastos,
             borderRadius: 4,
@@ -912,8 +931,8 @@ function atualizarGraficos() {
             order: 1
           },
           {
-            label: 'Teto Orçado (100%)',
-            data: percentuaisExibicaoBarra.map(() => 100),
+            label: 'Limite 29% da Receita Realizada',
+            data: percentuaisExibicaoBarra.map(() => 29),
             backgroundColor: '#334155',
             borderRadius: 4,
             barThickness: 20,
@@ -942,8 +961,8 @@ function atualizarGraficos() {
             offset: 8,
             color: (ctx) => {
               const perc = percentuaisReais[ctx.dataIndex];
-              if (perc > 100) return '#ef4444';
-              if (perc >= 80) return '#fb923c';
+              if (perc >= 29) return '#ef4444';
+              if (perc >= 26.5) return '#fb923c';
               return '#34d399';
             },
             formatter: (value, ctx) => {
@@ -959,7 +978,7 @@ function atualizarGraficos() {
                   return `🚨 Sem Teto (${formatarK(gasto)})${textoCMV}`;
                 }
 
-                const alertaEstouro = percReal > 100 ? '🚨 ' : '';
+                const alertaEstouro = percReal >= 29 ? '🚨 ' : (percReal >= 26.5 ? '⚠️ ' : '');
                 return `${alertaEstouro}${percReal.toFixed(1)}% (${formatarK(gasto)} / ${formatarK(teto)})${textoCMV}`;
               }
               return '';
@@ -969,7 +988,7 @@ function atualizarGraficos() {
         scales: {
           x: {
             min: 0,
-            max: 100,
+            max: 35,
             ticks: { 
               callback: (val) => val + '%', 
               color: '#94a3b8', 
@@ -1317,22 +1336,22 @@ function renderizarInsightsIA(listaAnalise) {
   listaAnalise.forEach(item => {
     item.mediaDiaria = item.gasto / (diaAtual || 1);
     item.projecaoFimMes = item.mediaDiaria * diasNoMes;
-    item.percProjecao = item.despOrc > 0 ? (item.projecaoFimMes / item.despOrc) * 100 : 0;
+    item.percProjecao = item.recReal > 0 ? (item.projecaoFimMes / item.recReal) * 100 : 0;
   });
 
   const folga = listaAnalise.filter(i => i.restante > 0).sort((a, b) => b.restante - a.restante);
 
-  listaAnalise.filter(i => i.despOrc === 0 && i.gasto > 0).forEach(item => {
+  listaAnalise.filter(i => i.recReal === 0 && i.gasto > 0).forEach(item => {
     const doador = folga.find(b => b.restante >= item.gasto && b.depto !== item.depto);
     const card = document.createElement('div');
     card.className = "p-2.5 rounded-lg bg-red-50 border border-red-200 text-xs text-red-800 shadow-sm mb-2";
     card.innerHTML = `
       <div class="flex justify-between items-start">
-        <span class="font-bold text-red-700">🚨 NÍVEL 1: LANÇAMENTO SEM ORÇAMENTO</span>
-        <span class="text-[10px] bg-red-200 text-red-800 px-1.5 py-0.5 rounded font-bold">Sem Teto Aprovado</span>
+        <span class="font-bold text-red-700">🚨 NÍVEL 1: SEM RECEITA REALIZADA</span>
+        <span class="text-[10px] bg-red-200 text-red-800 px-1.5 py-0.5 rounded font-bold">Sem Base de Receita</span>
       </div>
       <p class="mt-1 font-semibold text-gray-800">
-        <strong>${item.depto}</strong> registrou <strong>R$ ${formatarMoedaBR(item.gasto)}</strong> em requisições, mas não possui orçamento na DRE.
+        <strong>${item.depto}</strong> registrou <strong>R$ ${formatarMoedaBR(item.gasto)}</strong> em requisições, mas ainda não possui Receita Realizada para formar o limite de 29%.
       </p>
       ${doador ? `
         <div class="mt-1.5 pt-1.5 border-t border-red-200/60 text-[10px] text-red-900 font-medium">
@@ -1343,20 +1362,20 @@ function renderizarInsightsIA(listaAnalise) {
     container.appendChild(card);
   });
 
-  listaAnalise.filter(i => i.despOrc > 0 && i.gasto > i.despOrc).forEach(item => {
-    const excesso = item.gasto - item.despOrc;
+  listaAnalise.filter(i => i.recReal > 0 && i.gasto > i.limite29).forEach(item => {
+    const excesso = item.gasto - item.limite29;
     const doador = folga.find(b => b.restante >= excesso && b.depto !== item.depto);
-    const perc = ((item.gasto / item.despOrc) * 100).toFixed(1);
+    const perc = ((item.gasto / item.recReal) * 100).toFixed(1);
     
     const card = document.createElement('div');
     card.className = "p-2.5 rounded-lg bg-red-50 border border-red-200 text-xs text-red-800 shadow-sm mb-2";
     card.innerHTML = `
       <div class="flex justify-between items-start">
         <span class="font-bold text-red-700">🚨 NÍVEL 1: DESPESA EXCEDIDA</span>
-        <span class="text-[10px] bg-red-200 text-red-800 px-1.5 py-0.5 rounded font-bold">${perc}% do Orçado</span>
+        <span class="text-[10px] bg-red-200 text-red-800 px-1.5 py-0.5 rounded font-bold">${perc}% da Receita Realizada</span>
       </div>
       <p class="mt-1 font-semibold text-gray-800">
-        <strong>${item.depto}</strong> excedeu o orçado em <strong>R$ ${formatarMoedaBR(excesso)}</strong>.
+        <strong>${item.depto}</strong> ultrapassou o limite de 29% da Receita Realizada em <strong>R$ ${formatarMoedaBR(excesso)}</strong>.
       </p>
       ${doador ? `
         <div class="mt-1.5 pt-1.5 border-t border-red-200/60 text-[10px] text-red-900 font-medium">
@@ -1368,19 +1387,19 @@ function renderizarInsightsIA(listaAnalise) {
   });
 
   listaAnalise.filter(i => {
-    const perc = i.despOrc > 0 ? (i.gasto / i.despOrc) * 100 : 0;
-    return perc >= 80 && perc <= 99.9;
+    const perc = i.recReal > 0 ? (i.gasto / i.recReal) * 100 : 0;
+    return perc >= 26.5 && perc < 29;
   }).forEach(item => {
-    const perc = ((item.gasto / item.despOrc) * 100).toFixed(1);
+    const perc = ((item.gasto / item.recReal) * 100).toFixed(1);
     const card = document.createElement('div');
     card.className = "p-2.5 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-900 shadow-sm mb-2";
     card.innerHTML = `
       <div class="flex justify-between items-start">
-        <span class="font-bold text-amber-800">⚠️ NÍVEL 2: ALERTA DE CONSUMO ELEVADO</span>
-        <span class="text-[10px] bg-amber-200 text-amber-900 px-1.5 py-0.5 rounded font-bold">${perc}% do Teto</span>
+        <span class="font-bold text-amber-800">⚠️ NÍVEL 2: ALERTA DE 26,5%</span>
+        <span class="text-[10px] bg-amber-200 text-amber-900 px-1.5 py-0.5 rounded font-bold">${perc}% da Receita Realizada</span>
       </div>
       <p class="mt-1 font-medium">
-        O setor <strong>${item.depto}</strong> atingiu <strong>${perc}%</strong> do teto orçamentário. Restam apenas <strong>R$ ${formatarMoedaBR(item.restante)}</strong>.
+        O setor <strong>${item.depto}</strong> atingiu <strong>${perc}%</strong> da Receita Realizada. Restam até o limite de 29% <strong>R$ ${formatarMoedaBR(item.restante)}</strong>.
       </p>
     `;
     container.appendChild(card);
@@ -1388,9 +1407,9 @@ function renderizarInsightsIA(listaAnalise) {
 
   listaAnalise.filter(i => 
     i.restante >= 0 && 
-    i.despOrc > 0 && 
-    i.percProjecao > 110 && 
-    (i.gasto / i.despOrc) > 0.20
+    i.recReal > 0 && 
+    i.percProjecao > 29 && 
+    (i.gasto / i.recReal) > 0.20
   ).sort((a, b) => b.percProjecao - a.percProjecao).slice(0, 2).forEach(item => {
     const card = document.createElement('div');
     card.className = "p-2.5 rounded-lg bg-indigo-50 border border-indigo-200 text-xs text-indigo-900 shadow-sm mb-2";
