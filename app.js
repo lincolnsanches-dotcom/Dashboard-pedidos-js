@@ -1105,15 +1105,20 @@ function atualizarGraficos() {
       abaBudgets.removeChild(cardMO);
     }
 
-    // Posicionamento definitivo: mesma coluna do gráfico principal e linha
-    // seguinte no grid do Dashboard.
-    if (gradeDashboard) {
+    // Posicionamento definitivo: coloca o gráfico de MO DENTRO do mesmo
+    // card do gráfico principal, aproveitando o espaço vazio existente.
+    // Nenhuma lógica de cálculo, dados ou gráfico é removida.
+    if (cardPrincipal) {
+      cardMO.style.width = '100%';
+      cardMO.style.gridColumn = 'auto';
+      cardMO.style.gridRow = 'auto';
+      cardMO.style.marginTop = '12px';
+      cardPrincipal.appendChild(cardMO);
+    } else if (gradeDashboard) {
       const colunaPrincipal = window.getComputedStyle(cardPrincipal).gridColumn;
       if (colunaPrincipal && colunaPrincipal !== 'auto') {
         cardMO.style.gridColumn = colunaPrincipal;
       } else {
-        // Para Tailwind/grades responsivas em que o computed style não
-        // preserva a classe, força a coluna esquerda do Dashboard.
         cardMO.style.gridColumn = '1 / span 8';
       }
       cardMO.style.gridRow = 'auto';
