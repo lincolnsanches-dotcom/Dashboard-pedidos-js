@@ -405,7 +405,7 @@ function importarRelatorioDRE(evento) {
         const deptoLower = deptoTexto.toLowerCase();
         const contaLimpa = deptoTexto.replace(/\s+/g, '');
 
-        // CAPTURA DA MÃO DE OBRA PELO MAIOR VALOR (Evita pegar sublinhas pequenas ou somar duplicado)
+        // 1. CAPTURA DE MÃO DE OBRA (3.12.205)
         if (
           contaLimpa.startsWith('3.12.205') || 
           deptoLower.includes('serviços de terceiros') || 
@@ -415,47 +415,43 @@ function importarRelatorioDRE(evento) {
           if (valOrcado > totalMaoDeObraOrcado) {
             totalMaoDeObraOrcado = valOrcado;
           }
+          contaAtual = null;
           return;
         }
 
-        // Se a DRE não usar a linha sintética 3.12.205, acumula APENAS as contas analíticas de Terceiros (3.12.102.003)
-        if (totalMaoDeObraOrcado === 0 && deptoTexto.includes('3.12.102.003')) {
-          const valOrcado = converterParaNumero(row[2]);
-          if (valOrcado > 0) {
-            totalMaoDeObraOrcado += valOrcado;
-          }
-          return;
-        }
-
+        // 2. CONTEXTO DE RECEITA DE ALIMENTOS
         if (
           deptoTexto.includes('3.11.102.001') || 
           deptoTexto.includes('3.11.102.003') || 
           deptoTexto.includes('3.11.102.004') || 
-          deptoTexto.includes('3.11.102.018') || 
-          (deptoLower.includes('receita') && deptoLower.includes('alimento'))
+          deptoTexto.includes('3.11.102.018')
         ) {
           contaAtual = 'RECEITA_ALIMENTOS';
           return;
         }
 
+        // 3. CONTEXTO DE DESPESA DE ALIMENTOS (INCLUI ALMOÇO/JANTAR .001 E CAFÉ .003)
         if (
-          deptoTexto.includes('3.12.102.001') || deptoTexto.includes('3.12.102.003') || 
-          (deptoLower.includes('custo') && deptoLower.includes('alimento'))
+          deptoTexto.includes('3.12.102.001') || 
+          deptoTexto.includes('3.12.102.003')
         ) {
           contaAtual = 'DESPESA_ALIMENTOS';
           return;
         }
 
+        // 4. CANCELA CONTEXTO SE ENTRAR EM BEBIDAS OU OUTRAS CONTAS SINTÉTICAS
         if (
           deptoTexto.includes('3.11.102.002') || 
           deptoTexto.includes('3.11.102.005') || 
           deptoTexto.includes('3.12.102.002') || 
-          deptoLower.includes('bebida')
+          deptoLower.includes('bebida') ||
+          (deptoTexto.match(/^3\.\d+\.\d+/) && !deptoTexto.includes('3.12.102.001') && !deptoTexto.includes('3.12.102.003'))
         ) {
           contaAtual = null;
           return;
         }
 
+        // 5. SOMATÓRIO POR CENTRO DE CUSTO (2401, 2407, 2408, ETC)
         if (contaAtual) {
           const match = deptoTexto.match(/24\d{2}/);
           if (match) {
@@ -477,7 +473,6 @@ function importarRelatorioDRE(evento) {
         }
       });
 
-      // Atribui o valor correto e não duplicado à Mão de Obra
       despesasOrcadas[chaveMes]["Mão de Obra (Serviços de Terceiros)"] = totalMaoDeObraOrcado;
 
       localStorage.setItem('requisicoes_receitas_orcadas', JSON.stringify(receitasOrcadas));
@@ -487,7 +482,7 @@ function importarRelatorioDRE(evento) {
       sincronizarComFirebase();
 
       renderizarFormBudgets();
-      alert(`✅ DRE Importada com Sucesso para ${chaveMes}! Mão de Obra ajustada para: R$ ${formatarMoedaBR(totalMaoDeObraOrcado)}`);
+      alert(`✅ DRE Importada com Sucesso para ${chaveMes}!`);
 
     } catch (err) {
       console.error(err);
@@ -496,6 +491,11 @@ function importarRelatorioDRE(evento) {
   };
   reader.readAsArrayBuffer(file);
 }
+
+
+
+
+
 
 const formReq = document.getElementById('form-requisicao');
 if (formReq) {
@@ -1482,7 +1482,7 @@ function gerarTextoRelatorioExecutivo() {
   }, 0);
 
   const chaveMesRelatorio = `${String(hoje.getMonth() + 1).padStart(2, '0')}-${hoje.getFullYear()}`;
-  const orcamentoMORelatorio = obterOrcamentoMaoDeObra(chaveMesRelatorio);
+  const orcamentoMORelatorio = obtainingOrcamentoMaoDeObra(chaveMesRelatorio);
   const cmvRealPct = recRealTotal > 0 ? (reqLancTotal / recRealTotal) * 100 : 0;
   const META_CMV = 23.0;
   const saving = recRealTotal * ((META_CMV - cmvRealPct) / 100);
