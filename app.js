@@ -439,7 +439,7 @@ function importarRelatorioDRE(evento) {
         }
 
         if (
-          deptoTexto.includes('3.12.102.001') || 
+          deptoTexto.includes('3.12.102.001') || deptoTexto.includes('3.12.102.003') || 
           (deptoLower.includes('custo') && deptoLower.includes('alimento'))
         ) {
           contaAtual = 'DESPESA_ALIMENTOS';
